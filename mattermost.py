@@ -1,0 +1,66 @@
+"""
+mattermost.py — Wrapper around mattermostdriver for posting messages.
+
+All other modules call these functions; none import mattermostdriver directly.
+Uses a lazy singleton so the driver connects on first use, not at import time.
+"""
+
+import logging
+
+from mattermostdriver import Driver
+
+import config
+
+logger = logging.getLogger(__name__)
+
+_driver: Driver | None = None
+
+
+def _get_driver() -> Driver:
+    """Return the singleton Driver, connecting on first call."""
+    global _driver
+    if _driver is None:
+        parsed = config.MATTERMOST_URL
+        # Determine scheme and host from URL
+        if parsed.startswith("https://"):
+            scheme = "https"
+            host = parsed[len("https://"):]
+            port = 443
+        elif parsed.startswith("http://"):
+            scheme = "http"
+            host = parsed[len("http://"):]
+            port = 80
+        else:
+            scheme = "https"
+            host = parsed
+            port = 443
+
+        # Strip any explicit port from the host
+        if ":" in host:
+            host, port_str = host.rsplit(":", 1)
+            port = int(port_str)
+
+        _driver = Driver(
+            {
+                "url": host,
+                "token": config.MATTERMOST_TOKEN,
+                "scheme": scheme,
+                "port": port,
+                "verify": True,
+            }
+        )
+        _driver.login()
+        logger.info("Mattermost driver connected to %s", config.MATTERMOST_URL)
+    return _driver
+
+
+def post_to_channel(channel_id: str, message: str) -> None:
+    """Post a message to a channel by ID."""
+    _get_driver().posts.create_post(
+        options={"channel_id": channel_id, "message": message}
+    )
+
+
+def post_to_announcement_channel(message: str) -> None:
+    """Post to the configured announcement channel."""
+    post_to_channel(config.MATTERMOST_CHANNEL_ID, message)
