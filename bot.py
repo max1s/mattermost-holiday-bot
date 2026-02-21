@@ -162,7 +162,7 @@ def _start_scheduler() -> BackgroundScheduler:
 if __name__ == "__main__":
     try:
         database.init_db()
-        logger.info("Database initialised at bot.db")
+        logger.info("Database initialised at %s", config.DB_PATH)
     except Exception as exc:
         logger.critical("Failed to initialise database: %s", exc)
         sys.exit(1)

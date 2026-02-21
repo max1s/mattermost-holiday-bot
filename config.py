@@ -6,6 +6,7 @@ crashes immediately with a clear error if misconfigured.
 """
 
 import os
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
@@ -37,6 +38,12 @@ MATTERMOST_TEAM_ID: str = _require("MATTERMOST_TEAM_ID")
 MATTERMOST_CHANNEL_ID: str = _require("MATTERMOST_CHANNEL_ID")
 
 BOT_PORT: int = int(os.getenv("BOT_PORT", "5000"))
+
+# Database path — defaults to a permanent location that survives restarts
+# regardless of which directory the bot is launched from.
+_default_db = Path.home() / ".local" / "share" / "mattermost-holiday-bot" / "bot.db"
+DB_PATH: Path = Path(os.getenv("DB_PATH", str(_default_db))).expanduser().resolve()
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 TIMEZONE: ZoneInfo = _load_timezone()
 

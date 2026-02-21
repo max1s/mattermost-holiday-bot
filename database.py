@@ -10,12 +10,12 @@ from contextlib import contextmanager
 from datetime import date
 from typing import Generator
 
-DB_PATH = "bot.db"
+import config
 
 
 @contextmanager
 def _conn() -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
