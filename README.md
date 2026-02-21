@@ -8,12 +8,16 @@ A Mattermost bot that lets your team track holidays and birthdays via slash comm
 
 | Command | Description |
 |---------|-------------|
-| `/holiday-add <YYYY-MM-DD> [YYYY-MM-DD] [label]` | Add a holiday (single day or date range, optional label) |
+| `/holiday-add <DD-MM-YYYY> [DD-MM-YYYY] [label]` | Add a holiday (single day or date range, optional label) |
 | `/holiday-list` | List your upcoming holidays with their IDs |
 | `/holiday-delete <ID>` | Delete one of your holidays |
-| `/birthday-set <YYYY-MM-DD>` | Set or update your birthday |
+| `/holiday-help` | Show full help for all commands |
+| `/birthday-set <DD-MM-YYYY>` | Set or update your birthday |
 | `/birthday-delete` | Remove your birthday |
 | `/away-today` | See everyone who is away today |
+| `/holiday-notify <DD-MM-YYYY> [DD-MM-YYYY] [label]` | ⚠️ Experimental: add holiday + email the company administrator |
+
+> **Date format** defaults to `DD-MM-YYYY` (European). Change with the `DATE_FORMAT` env var — see Configuration below.
 
 ### Scheduled Announcements
 
@@ -66,6 +70,8 @@ For each command, set:
 | `holiday-add` | `/slash/holiday-add` | `SLASH_TOKEN_HOLIDAY_ADD` |
 | `holiday-list` | `/slash/holiday-list` | `SLASH_TOKEN_HOLIDAY_LIST` |
 | `holiday-delete` | `/slash/holiday-delete` | `SLASH_TOKEN_HOLIDAY_DELETE` |
+| `holiday-help` | `/slash/holiday-help` | `SLASH_TOKEN_HOLIDAY_HELP` |
+| `holiday-notify` | `/slash/holiday-notify` | `SLASH_TOKEN_HOLIDAY_NOTIFY` |
 | `birthday-set` | `/slash/birthday-set` | `SLASH_TOKEN_BIRTHDAY_SET` |
 | `birthday-delete` | `/slash/birthday-delete` | `SLASH_TOKEN_BIRTHDAY_DELETE` |
 | `away-today` | `/slash/away-today` | `SLASH_TOKEN_AWAY_TODAY` |
@@ -94,9 +100,21 @@ MATTERMOST_CHANNEL_ID=your_channel_id_here
 BOT_PORT=5000
 TIMEZONE=Europe/London   # Any valid IANA timezone name
 
+# Date format — default is DD-MM-YYYY (European). See .env.example for options.
+# DATE_FORMAT=%d-%m-%Y
+
+# Optional: email settings for /holiday-notify
+# COMPANY_ADMIN_EMAIL=admin@example.com
+# SMTP_HOST=localhost
+# SMTP_PORT=587
+# SMTP_USER=holiday-bot@example.com
+# SMTP_PASSWORD=secret
+
 SLASH_TOKEN_HOLIDAY_ADD=token_from_mattermost
 SLASH_TOKEN_HOLIDAY_LIST=token_from_mattermost
 SLASH_TOKEN_HOLIDAY_DELETE=token_from_mattermost
+SLASH_TOKEN_HOLIDAY_HELP=token_from_mattermost
+SLASH_TOKEN_HOLIDAY_NOTIFY=token_from_mattermost
 SLASH_TOKEN_BIRTHDAY_SET=token_from_mattermost
 SLASH_TOKEN_BIRTHDAY_DELETE=token_from_mattermost
 SLASH_TOKEN_AWAY_TODAY=token_from_mattermost

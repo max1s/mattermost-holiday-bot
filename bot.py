@@ -2,7 +2,7 @@
 bot.py — Flask app entrypoint.
 
 Registers all slash command routes, verifies Mattermost tokens,
-and starts the APScheduler background scheduler.
+and starts the APScheduler background scheduler and WebSocket listener.
 """
 
 import hmac
@@ -16,6 +16,8 @@ from flask import Flask, abort, jsonify, request
 import commands
 import config
 import database
+import events
+import mattermost
 import scheduler as sched_jobs
 
 logging.basicConfig(
@@ -33,10 +35,6 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 
 def _verify_token(command_name: str, received: str) -> bool:
-    """
-    Compare the received slash command token against the configured expected token.
-    Uses hmac.compare_digest to prevent timing-based token enumeration.
-    """
     expected = config.SLASH_TOKENS.get(command_name)
     if not expected:
         return False
@@ -44,18 +42,13 @@ def _verify_token(command_name: str, received: str) -> bool:
 
 
 def _parse_slash_request() -> tuple[str, str, str]:
-    """Extract (user_id, username, text) from a Mattermost slash command POST body."""
-    user_id = request.form.get("user_id", "")
+    user_id  = request.form.get("user_id", "")
     username = request.form.get("user_name", "")
-    text = request.form.get("text", "").strip()
+    text     = request.form.get("text", "").strip()
     return user_id, username, text
 
 
-def _guard(command_name: str) -> tuple[str, str, str] | None:
-    """
-    Verify token and extract request fields. Returns (user_id, username, text)
-    or calls abort(401) if the token is invalid.
-    """
+def _guard(command_name: str) -> tuple[str, str, str]:
     token = request.form.get("token", "")
     if not _verify_token(command_name, token):
         logger.warning("Invalid token for command '%s'.", command_name)
@@ -64,7 +57,6 @@ def _guard(command_name: str) -> tuple[str, str, str] | None:
 
 
 def _handle(fn):
-    """Wrap a command function call with standard error handling."""
     try:
         return jsonify(fn())
     except Exception:
@@ -94,6 +86,18 @@ def route_holiday_list():
 def route_holiday_delete():
     user_id, username, text = _guard("holiday-delete")
     return _handle(lambda: commands.cmd_holiday_delete(user_id, text))
+
+
+@app.route("/slash/holiday-help", methods=["POST"])
+def route_holiday_help():
+    _guard("holiday-help")
+    return _handle(lambda: commands.cmd_help())
+
+
+@app.route("/slash/holiday-notify", methods=["POST"])
+def route_holiday_notify():
+    user_id, username, text = _guard("holiday-notify")
+    return _handle(lambda: commands.cmd_holiday_notify(user_id, username, text))
 
 
 @app.route("/slash/birthday-set", methods=["POST"])
@@ -129,19 +133,16 @@ def health():
 
 def _start_scheduler() -> BackgroundScheduler:
     tz = config.TIMEZONE
-
     scheduler = BackgroundScheduler(timezone=str(tz))
 
-    # Weekly birthday + holiday summary — every Monday at 09:00
     scheduler.add_job(
         sched_jobs.job_weekly_summary,
         CronTrigger(day_of_week="mon", hour=9, minute=0, timezone=tz),
         id="weekly_summary",
         name="Weekly birthday & holiday summary",
-        misfire_grace_time=3600,  # fire up to 1h late if the server was down at 9AM
+        misfire_grace_time=3600,
     )
 
-    # Daily holiday reminders — Mon–Fri at 09:00
     scheduler.add_job(
         sched_jobs.job_daily_reminders,
         CronTrigger(day_of_week="mon-fri", hour=9, minute=0, timezone=tz),
@@ -168,6 +169,13 @@ if __name__ == "__main__":
         sys.exit(1)
 
     _scheduler = _start_scheduler()
+
+    # Start WebSocket listener for real-time events (e.g. bot added to channel)
+    try:
+        mattermost.start_websocket_listener(events.handle_event)
+    except Exception as exc:
+        # Non-fatal — bot still works without WebSocket; channel-join greeting won't fire
+        logger.warning("Could not start WebSocket listener: %s", exc)
 
     try:
         app.run(host="0.0.0.0", port=config.BOT_PORT, debug=False)

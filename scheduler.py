@@ -33,21 +33,20 @@ def _week_bounds(ref: date) -> tuple[date, date]:
 
 
 def _fmt_date(d: date) -> str:
-    return d.strftime("%a %-d %b %Y")
+    """Format a date using the configured DATE_FORMAT."""
+    return d.strftime(config.DATE_FORMAT)
 
 
 def _fmt_date_range(start: date, end: date) -> str:
     if start == end:
         return _fmt_date(start)
-    if start.year == end.year:
-        return f"{start.strftime('%a %-d %b')} – {end.strftime('%a %-d %b %Y')}"
     return f"{_fmt_date(start)} – {_fmt_date(end)}"
 
 
-def _fmt_birthday_date(birth_date_str: str, ref_year: int) -> str:
-    """Format a birthday month-day for display, e.g. '4 July'."""
+def _fmt_birthday_date(birth_date_str: str) -> str:
+    """Format a birthday as day + month name, e.g. '04 Jul'. Always human-readable."""
     bday = date.fromisoformat(birth_date_str)
-    return bday.strftime("%-d %b")
+    return bday.strftime("%d %b")
 
 
 # ---------------------------------------------------------------------------
@@ -65,13 +64,11 @@ def job_weekly_summary() -> None:
         next_mon = this_mon + timedelta(weeks=1)
         next_sun = this_sun + timedelta(weeks=1)
 
-        # Gather data
         bdays_this = database.get_birthdays_in_range(this_mon, this_sun)
         bdays_next = database.get_birthdays_in_range(next_mon, next_sun)
-        hols_this = database.get_holidays_overlapping_range(this_mon, this_sun)
-        hols_next = database.get_holidays_overlapping_range(next_mon, next_sun)
+        hols_this  = database.get_holidays_overlapping_range(this_mon, this_sun)
+        hols_next  = database.get_holidays_overlapping_range(next_mon, next_sun)
 
-        # Skip posting if everything is empty
         if not any([bdays_this, bdays_next, hols_this, hols_next]):
             logger.info("Weekly summary: nothing to report.")
             return
@@ -90,8 +87,7 @@ def job_weekly_summary() -> None:
             lines = [f"**{week_label}:**"]
             if rows:
                 for row in rows:
-                    day_str = _fmt_birthday_date(row["birth_date"], this_mon.year)
-                    lines.append(f"- @{row['username']} ({day_str})")
+                    lines.append(f"- @{row['username']} ({_fmt_birthday_date(row['birth_date'])})")
             else:
                 lines.append(f"_No birthdays {week_label.lower()}._")
             return lines
@@ -111,7 +107,7 @@ def job_weekly_summary() -> None:
                 lines.append("|--------|------|---------|")
                 for row in rows:
                     start = date.fromisoformat(row["start_date"])
-                    end = date.fromisoformat(row["end_date"])
+                    end   = date.fromisoformat(row["end_date"])
                     label = row["label"] or ""
                     lines.append(
                         f"| @{row['username']} | {_fmt_date_range(start, end)} | {label} |"
@@ -126,8 +122,7 @@ def job_weekly_summary() -> None:
         sections.append("")
         sections.append(f"---\n_Next summary: Monday {_fmt_date(next_mon)}_")
 
-        message = "\n".join(sections)
-        mattermost.post_to_announcement_channel(message)
+        mattermost.post_to_announcement_channel("\n".join(sections))
         logger.info("Weekly summary posted.")
 
     except Exception:
@@ -144,7 +139,7 @@ def job_daily_reminders() -> None:
     If nothing is due, no message is posted.
     """
     try:
-        today = _today()
+        today    = _today()
         target_7 = today + timedelta(days=7)
         target_1 = today + timedelta(days=1)
 
@@ -161,7 +156,7 @@ def job_daily_reminders() -> None:
             lines.append(f"**:hourglass: One week away (starting {_fmt_date(target_7)}):**")
             for row in hols_7:
                 start = date.fromisoformat(row["start_date"])
-                end = date.fromisoformat(row["end_date"])
+                end   = date.fromisoformat(row["end_date"])
                 label_str = f" _({row['label']})_" if row["label"] else ""
                 lines.append(
                     f"- @{row['username']}: off from **{_fmt_date(start)}** "
@@ -173,15 +168,14 @@ def job_daily_reminders() -> None:
             lines.append(f"**:alarm_clock: Starting tomorrow ({_fmt_date(target_1)}):**")
             for row in hols_1:
                 start = date.fromisoformat(row["start_date"])
-                end = date.fromisoformat(row["end_date"])
+                end   = date.fromisoformat(row["end_date"])
                 label_str = f" _({row['label']})_" if row["label"] else ""
                 lines.append(
                     f"- @{row['username']}: off from **{_fmt_date(start)}** "
                     f"until **{_fmt_date(end)}** (inclusive){label_str}"
                 )
 
-        message = "\n".join(lines)
-        mattermost.post_to_announcement_channel(message)
+        mattermost.post_to_announcement_channel("\n".join(lines))
         logger.info("Daily reminders posted (7-day: %d, 1-day: %d).", len(hols_7), len(hols_1))
 
     except Exception:

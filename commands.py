@@ -8,10 +8,16 @@ All responses are ephemeral (visible only to the invoking user) unless
 noted otherwise.
 """
 
-from datetime import date, datetime, timedelta
+import logging
+import smtplib
+from datetime import date, datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import config
 import database
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -29,60 +35,116 @@ def _today() -> date:
 
 
 def _parse_date(token: str) -> date | None:
-    """Try to parse a YYYY-MM-DD string. Returns None on failure."""
+    """Try to parse a date string using the configured DATE_FORMAT. Returns None on failure."""
     try:
-        return datetime.strptime(token, "%Y-%m-%d").date()
+        return datetime.strptime(token, config.DATE_FORMAT).date()
     except ValueError:
         return None
 
 
 def _fmt_date(d: date) -> str:
-    """Format a date as 'Mon 1 Jun 2026'."""
-    return d.strftime("%a %-d %b %Y")
+    """Format a date using the configured DATE_FORMAT."""
+    return d.strftime(config.DATE_FORMAT)
 
 
 def _fmt_date_range(start: date, end: date) -> str:
-    """
-    Format a date range compactly:
-      same day  → 'Mon 1 Jun 2026'
-      same year → 'Mon 1 Jun – Fri 5 Jun 2026'
-      diff year → 'Mon 29 Dec 2025 – Fri 2 Jan 2026'
-    """
+    """Format a date range. Single date if start == end, otherwise 'start – end'."""
     if start == end:
         return _fmt_date(start)
-    if start.year == end.year:
-        start_str = start.strftime("%a %-d %b")
-        end_str = end.strftime("%a %-d %b %Y")
-        return f"{start_str} – {end_str}"
     return f"{_fmt_date(start)} – {_fmt_date(end)}"
 
 
+def _example(d: date) -> str:
+    """Return a date formatted as an example for help/usage text."""
+    return d.strftime(config.DATE_FORMAT)
+
+
 # ---------------------------------------------------------------------------
-# /holiday-add <YYYY-MM-DD> [YYYY-MM-DD] [label]
+# Help text (used by /holiday-help and the channel join welcome message)
 # ---------------------------------------------------------------------------
 
-_HOLIDAY_ADD_USAGE = (
-    "Usage: `/holiday-add <YYYY-MM-DD> [YYYY-MM-DD] [label]`\n"
-    "Examples:\n"
-    "• `/holiday-add 2026-08-03` — single day off\n"
-    "• `/holiday-add 2026-08-03 2026-08-07` — date range\n"
-    "• `/holiday-add 2026-08-03 2026-08-07 Summer holiday` — with label"
-)
+def help_text() -> str:
+    """Build the help message using the currently configured date format."""
+    ex_single = _example(date(2026, 8, 3))
+    ex_end    = _example(date(2026, 8, 7))
+    ex_bday   = _example(date(1990, 7, 4))
+    fmt       = config.DATE_FORMAT
+
+    return (
+        "### :calendar: Holiday Bot — Commands\n\n"
+        "**Holidays**\n"
+        "| Command | Description |\n"
+        "|---------|-------------|\n"
+        f"| `/holiday-add <{fmt}> [{fmt}] [label]` | Add a holiday (single day or range, label optional) |\n"
+        "| `/holiday-list` | List your upcoming holidays with their IDs |\n"
+        "| `/holiday-delete <ID>` | Delete one of your holidays by ID |\n\n"
+        "**Birthdays**\n"
+        "| Command | Description |\n"
+        "|---------|-------------|\n"
+        f"| `/birthday-set <{fmt}>` | Set or update your birthday |\n"
+        "| `/birthday-delete` | Remove your birthday |\n\n"
+        "**Queries**\n"
+        "| Command | Description |\n"
+        "|---------|-------------|\n"
+        "| `/away-today` | See everyone who is away today (posts to channel) |\n"
+        "| `/holiday-help` | Show this help message |\n\n"
+        "**⚠️ Experimental**\n"
+        "| Command | Description |\n"
+        "|---------|-------------|\n"
+        f"| `/holiday-notify <{fmt}> [{fmt}] [label]` | Add a holiday and email the company administrator |\n\n"
+        "**Scheduled Announcements**\n"
+        "- **Monday 9AM** — Weekly summary of birthdays and holidays for this week and next\n"
+        "- **Weekdays 9AM** — Reminder when someone's holiday is 1 week or 1 day away\n\n"
+        "**Examples**\n"
+        f"```\n"
+        f"/holiday-add {ex_single}\n"
+        f"/holiday-add {ex_single} {ex_end}\n"
+        f"/holiday-add {ex_single} {ex_end} Summer holiday\n"
+        f"/birthday-set {ex_bday}\n"
+        f"/away-today\n"
+        "```\n\n"
+        f"_Dates are in `{fmt}` format. "
+        "Change with the `DATE_FORMAT` env var (e.g. `%Y-%m-%d` for ISO, `%m/%d/%Y` for US)._"
+    )
 
 
-def cmd_holiday_add(user_id: str, username: str, text: str) -> dict:
+def cmd_help() -> dict:
+    return _resp(help_text())
+
+
+# ---------------------------------------------------------------------------
+# Shared argument parser for /holiday-add and /holiday-notify
+# ---------------------------------------------------------------------------
+
+def _holiday_add_usage() -> str:
+    fmt = config.DATE_FORMAT
+    ex1 = _example(date(2026, 8, 3))
+    ex2 = _example(date(2026, 8, 7))
+    return (
+        f"Usage: `/holiday-add <{fmt}> [{fmt}] [label]`\n"
+        "Examples:\n"
+        f"• `/holiday-add {ex1}` — single day off\n"
+        f"• `/holiday-add {ex1} {ex2}` — date range\n"
+        f"• `/holiday-add {ex1} {ex2} Summer holiday` — with label"
+    )
+
+
+def _parse_holiday_args(text: str) -> tuple[date, date, str | None] | str:
+    """
+    Parse the argument string for /holiday-add and /holiday-notify.
+    Returns (start, end, label) on success, or an error/usage string on failure.
+    """
     if not text.strip():
-        return _resp(_HOLIDAY_ADD_USAGE)
+        return _holiday_add_usage()
 
-    # Split into at most 3 tokens: start, maybe-end-or-label-start, rest-of-label
     parts = text.strip().split(maxsplit=2)
 
-    # Token 0: required start date
     start = _parse_date(parts[0])
     if start is None:
-        return _resp(
-            f":x: Could not parse `{parts[0]}` as a date (expected YYYY-MM-DD).\n\n"
-            + _HOLIDAY_ADD_USAGE
+        return (
+            f":x: Could not parse `{parts[0]}` as a date "
+            f"(expected format: `{config.DATE_FORMAT}`).\n\n"
+            + _holiday_add_usage()
         )
 
     end: date = start
@@ -91,22 +153,32 @@ def cmd_holiday_add(user_id: str, username: str, text: str) -> dict:
     if len(parts) >= 2:
         maybe_end = _parse_date(parts[1])
         if maybe_end is not None:
-            # Token 1 is a valid date — use as end date
             end = maybe_end
             if len(parts) == 3:
                 label = parts[2].strip() or None
         else:
-            # Token 1 is not a date — treat "parts[1] [parts[2]]" as label
             label_parts = [parts[1]]
             if len(parts) == 3:
                 label_parts.append(parts[2])
             label = " ".join(label_parts).strip() or None
 
     if end < start:
-        return _resp(":x: End date cannot be before start date.")
+        return ":x: End date cannot be before start date."
 
+    return start, end, label
+
+
+# ---------------------------------------------------------------------------
+# /holiday-add
+# ---------------------------------------------------------------------------
+
+def cmd_holiday_add(user_id: str, username: str, text: str) -> dict:
+    parsed = _parse_holiday_args(text)
+    if isinstance(parsed, str):
+        return _resp(parsed)
+
+    start, end, label = parsed
     holiday_id = database.add_holiday(user_id, username, start.isoformat(), end.isoformat(), label)
-
     label_str = f": _{label}_" if label else ""
     return _resp(
         f":white_check_mark: Holiday added (ID: **{holiday_id}**)\n"
@@ -162,27 +234,27 @@ def cmd_holiday_delete(user_id: str, text: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# /birthday-set <YYYY-MM-DD>
+# /birthday-set <date>
 # ---------------------------------------------------------------------------
 
 def cmd_birthday_set(user_id: str, username: str, text: str) -> dict:
     text = text.strip()
     if not text:
         return _resp(
-            "Usage: `/birthday-set <YYYY-MM-DD>`\n"
-            "Example: `/birthday-set 1990-07-04`"
+            f"Usage: `/birthday-set <{config.DATE_FORMAT}>`\n"
+            f"Example: `/birthday-set {_example(date(1990, 7, 4))}`"
         )
 
     bday = _parse_date(text)
     if bday is None:
         return _resp(
-            f":x: Could not parse `{text}` as a date (expected YYYY-MM-DD).\n"
-            "Example: `/birthday-set 1990-07-04`"
+            f":x: Could not parse `{text}` as a date (expected `{config.DATE_FORMAT}`).\n"
+            f"Example: `/birthday-set {_example(date(1990, 7, 4))}`"
         )
 
     was_update = database.set_birthday(user_id, username, bday.isoformat())
     action = "updated" if was_update else "set"
-    display = bday.strftime("%-d %B")  # e.g. "4 July"
+    display = bday.strftime("%d %B")  # e.g. "04 July" — always human-readable
 
     return _resp(
         f":birthday: Birthday {action} to **{display}**.\n"
@@ -223,3 +295,77 @@ def cmd_away_today() -> dict:
         lines.append(f"- @{row['username']}: {_fmt_date_range(start, end)}{label_str}")
 
     return _resp("\n".join(lines), response_type="in_channel")
+
+
+# ---------------------------------------------------------------------------
+# /holiday-notify (experimental) — holiday-add + email to administrator
+# ---------------------------------------------------------------------------
+
+def _send_admin_email(
+    username: str,
+    start: date,
+    end: date,
+    label: str | None,
+    to_email: str,
+) -> None:
+    """Send a holiday notification email to the company administrator via SMTP."""
+    date_range = _fmt_date_range(start, end)
+    label_line = f"\nReason/Label: {label}" if label else ""
+
+    body = (
+        f"This is an automated notification from the Mattermost Holiday Bot.\n\n"
+        f"@{username} has registered a holiday:\n"
+        f"Dates: {date_range}{label_line}\n\n"
+        f"Submitted via the /holiday-notify slash command."
+    )
+
+    msg = MIMEMultipart()
+    msg["From"] = config.SMTP_FROM
+    msg["To"] = to_email
+    msg["Subject"] = f"Holiday notification: @{username} ({date_range})"
+    msg.attach(MIMEText(body, "plain"))
+
+    with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT) as smtp:
+        if config.SMTP_USE_TLS:
+            smtp.starttls()
+        if config.SMTP_USER and config.SMTP_PASSWORD:
+            smtp.login(config.SMTP_USER, config.SMTP_PASSWORD)
+        smtp.sendmail(config.SMTP_FROM, to_email, msg.as_string())
+
+
+def cmd_holiday_notify(user_id: str, username: str, text: str) -> dict:
+    """
+    ⚠️ Experimental. Same as /holiday-add but also emails the company administrator.
+    Requires COMPANY_ADMIN_EMAIL and SMTP settings in .env.
+    """
+    parsed = _parse_holiday_args(text)
+    if isinstance(parsed, str):
+        return _resp(parsed)
+
+    start, end, label = parsed
+    holiday_id = database.add_holiday(user_id, username, start.isoformat(), end.isoformat(), label)
+    label_str = f": _{label}_" if label else ""
+    base_msg = (
+        f":white_check_mark: Holiday added (ID: **{holiday_id}**)\n"
+        f"_{_fmt_date_range(start, end)}{label_str}_"
+    )
+
+    admin_email = config.COMPANY_ADMIN_EMAIL
+    if not admin_email:
+        return _resp(
+            base_msg + "\n\n"
+            ":warning: **Email not sent** — `COMPANY_ADMIN_EMAIL` is not set in the bot configuration."
+        )
+
+    try:
+        _send_admin_email(username, start, end, label, admin_email)
+        return _resp(base_msg + f"\n\n:email: Administrator notified at `{admin_email}`.")
+    except Exception:
+        logger.exception(
+            "Failed to send admin email for holiday %d by %s.", holiday_id, username
+        )
+        return _resp(
+            base_msg + "\n\n"
+            ":warning: **Email failed to send.** Your holiday was saved. "
+            "Check the bot logs and SMTP configuration."
+        )

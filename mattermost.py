@@ -5,7 +5,10 @@ All other modules call these functions; none import mattermostdriver directly.
 Uses a lazy singleton so the driver connects on first use, not at import time.
 """
 
+import asyncio
 import logging
+import threading
+from collections.abc import Callable, Coroutine
 
 from mattermostdriver import Driver
 
@@ -21,7 +24,6 @@ def _get_driver() -> Driver:
     global _driver
     if _driver is None:
         parsed = config.MATTERMOST_URL
-        # Determine scheme and host from URL
         if parsed.startswith("https://"):
             scheme = "https"
             host = parsed[len("https://"):]
@@ -35,7 +37,6 @@ def _get_driver() -> Driver:
             host = parsed
             port = 443
 
-        # Strip any explicit port from the host
         if ":" in host:
             host, port_str = host.rsplit(":", 1)
             port = int(port_str)
@@ -64,3 +65,29 @@ def post_to_channel(channel_id: str, message: str) -> None:
 def post_to_announcement_channel(message: str) -> None:
     """Post to the configured announcement channel."""
     post_to_channel(config.MATTERMOST_CHANNEL_ID, message)
+
+
+def get_bot_user_id() -> str:
+    """Return the bot's own Mattermost user ID."""
+    return _get_driver().users.get_user("me")["id"]
+
+
+def start_websocket_listener(handler: Callable[..., Coroutine]) -> threading.Thread:
+    """
+    Start the Mattermost WebSocket event listener in a background daemon thread.
+    The handler must be an async function that accepts a raw event string.
+    """
+    driver = _get_driver()  # ensure driver is connected before spawning thread
+
+    def _run() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            driver.init_websocket(handler)
+        except Exception:
+            logger.exception("WebSocket listener exited unexpectedly.")
+
+    thread = threading.Thread(target=_run, daemon=True, name="mattermost-websocket")
+    thread.start()
+    logger.info("WebSocket listener thread started.")
+    return thread
