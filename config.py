@@ -53,6 +53,7 @@ MATTERMOST_TEAM_ID: str = _require("MATTERMOST_TEAM_ID")
 MATTERMOST_CHANNEL_ID: str = _require("MATTERMOST_CHANNEL_ID")
 
 BOT_PORT: int = int(os.getenv("BOT_PORT", "5000"))
+VERIFY_SSL: bool = os.getenv("VERIFY_SSL", "true").lower() not in ("0", "false", "no")
 
 # Database path — defaults to a permanent location that survives restarts
 # regardless of which directory the bot is launched from.

@@ -71,30 +71,22 @@ def help_text() -> str:
     fmt       = config.DATE_FORMAT
 
     return (
-        "### :calendar: Holiday Bot — Commands\n\n"
+        ":calendar: **Holiday Bot — Commands**\n\n"
         "**Holidays**\n"
-        "| Command | Description |\n"
-        "|---------|-------------|\n"
-        f"| `/holiday-add <{fmt}> [{fmt}] [label]` | Add a holiday (single day or range, label optional) |\n"
-        "| `/holiday-list` | List your upcoming holidays with their IDs |\n"
-        "| `/holiday-delete <ID>` | Delete one of your holidays by ID |\n\n"
+        f"- `/holiday-add <{fmt}> [{fmt}] [label]` — Add a holiday (single day or range, label optional)\n"
+        "- `/holiday-list` — List your upcoming holidays with their IDs\n"
+        "- `/holiday-delete <ID>` — Delete one of your holidays by ID\n\n"
         "**Birthdays**\n"
-        "| Command | Description |\n"
-        "|---------|-------------|\n"
-        f"| `/birthday-set <{fmt}>` | Set or update your birthday |\n"
-        "| `/birthday-delete` | Remove your birthday |\n\n"
+        f"- `/birthday-set <{fmt}>` — Set or update your birthday\n"
+        "- `/birthday-delete` — Remove your birthday\n\n"
         "**Queries**\n"
-        "| Command | Description |\n"
-        "|---------|-------------|\n"
-        "| `/away-today` | See everyone who is away today (posts to channel) |\n"
-        "| `/holiday-help` | Show this help message |\n\n"
-        "**⚠️ Experimental**\n"
-        "| Command | Description |\n"
-        "|---------|-------------|\n"
-        f"| `/holiday-notify <{fmt}> [{fmt}] [label]` | Add a holiday and email the company administrator |\n\n"
+        "- `/away-today` — See everyone who is away today (posts to channel)\n"
+        "- `/holiday-help` — Show this help message\n\n"
+        "**Experimental**\n"
+        f"- `/holiday-notify <{fmt}> [{fmt}] [label]` — Add a holiday and notify the company administrator\n\n"
         "**Scheduled Announcements**\n"
-        "- **Monday 9AM** — Weekly summary of birthdays and holidays for this week and next\n"
-        "- **Weekdays 9AM** — Reminder when someone's holiday is 1 week or 1 day away\n\n"
+        "- Monday 9AM — Weekly summary of birthdays and holidays for this week and next\n"
+        "- Weekdays 9AM — Reminder when someone's holiday is 1 week or 1 day away\n\n"
         "**Examples**\n"
         f"```\n"
         f"/holiday-add {ex_single}\n"
@@ -102,9 +94,7 @@ def help_text() -> str:
         f"/holiday-add {ex_single} {ex_end} Summer holiday\n"
         f"/birthday-set {ex_bday}\n"
         f"/away-today\n"
-        "```\n\n"
-        f"_Dates are in `{fmt}` format. "
-        "Change with the `DATE_FORMAT` env var (e.g. `%Y-%m-%d` for ISO, `%m/%d/%Y` for US)._"
+        "```"
     )
 
 
@@ -352,9 +342,21 @@ def cmd_holiday_notify(user_id: str, username: str, text: str) -> dict:
 
     admin_email = config.COMPANY_ADMIN_EMAIL
     if not admin_email:
+        date_range = _fmt_date_range(start, end)
+        label_line = f"\nReason: {label}" if label else ""
+        email_template = (
+            f"Subject: Holiday Notification: {date_range}\n\n"
+            f"Hi,\n\n"
+            f"I wanted to let you know I will be on holiday from {_fmt_date(start)} to {_fmt_date(end)}{label_line}.\n\n"
+            f"Please update your records accordingly.\n\n"
+            f"Best regards,\n"
+            f"{username}"
+        )
         return _resp(
             base_msg + "\n\n"
-            ":warning: **Email not sent** — `COMPANY_ADMIN_EMAIL` is not set in the bot configuration."
+            ":warning: No administrator email is configured. "
+            "You can send the following email manually:\n"
+            f"```\n{email_template}\n```"
         )
 
     try:

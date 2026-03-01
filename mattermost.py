@@ -47,7 +47,7 @@ def _get_driver() -> Driver:
                 "token": config.MATTERMOST_TOKEN,
                 "scheme": scheme,
                 "port": port,
-                "verify": True,
+                "verify": config.VERIFY_SSL,
             }
         )
         _driver.login()
