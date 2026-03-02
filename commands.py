@@ -228,8 +228,9 @@ def cmd_holiday_list(user_id: str, text: str) -> dict:
     else:
         rows = database.get_upcoming_holidays_by_username(arg, today)
     if not rows:
-        return _resp(f":white_check_mark: No upcoming holidays found for @{arg}.")
-    lines = [f":desert_island: **Upcoming holidays for @{arg}:**\n"]
+        return _resp(f":white_check_mark: No upcoming holidays found for {arg}.")
+    display = database.get_alias(target_user_id) if target_user_id else arg
+    lines = [f":desert_island: **Upcoming holidays for {display}:**\n"]
     for row in rows:
         start = date.fromisoformat(row["start_date"])
         end = date.fromisoformat(row["end_date"])
