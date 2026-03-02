@@ -103,15 +103,11 @@ def job_weekly_summary() -> None:
         def _holiday_lines(rows: list, week_label: str) -> list[str]:
             lines = [f"**{week_label}:**"]
             if rows:
-                lines.append("| Person | Away | Details |")
-                lines.append("|--------|------|---------|")
                 for row in rows:
                     start = date.fromisoformat(row["start_date"])
                     end   = date.fromisoformat(row["end_date"])
-                    label = row["label"] or ""
-                    lines.append(
-                        f"| @{row['username']} | {_fmt_date_range(start, end)} | {label} |"
-                    )
+                    label_str = f" _({row['label']})_" if row["label"] else ""
+                    lines.append(f"- @{row['username']}: {_fmt_date_range(start, end)}{label_str}")
             else:
                 lines.append(f"_No holidays {week_label.lower()}._")
             return lines
