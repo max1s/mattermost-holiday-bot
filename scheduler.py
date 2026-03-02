@@ -86,13 +86,13 @@ def job_weekly_summary() -> None:
         aliases = database.get_all_aliases()
 
         def _name(row) -> str:
-            return aliases.get(row["user_id"], row["username"])
+            return aliases.get(row["user_id"], f"@{row['username']}")
 
         def _birthday_lines(rows: list, week_label: str) -> list[str]:
             lines = [f"**{week_label}:**"]
             if rows:
                 for row in rows:
-                    lines.append(f"- @{_name(row)} ({_fmt_birthday_date(row['birth_date'])})")
+                    lines.append(f"- {_name(row)} ({_fmt_birthday_date(row['birth_date'])})")
             else:
                 lines.append(f"_No birthdays {week_label.lower()}._")
             return lines
@@ -112,7 +112,7 @@ def job_weekly_summary() -> None:
                     start = date.fromisoformat(row["start_date"])
                     end   = date.fromisoformat(row["end_date"])
                     label_str = f" _({row['label']})_" if row["label"] else ""
-                    lines.append(f"- @{_name(row)}: {_fmt_date_range(start, end)}{label_str}")
+                    lines.append(f"- {_name(row)}: {_fmt_date_range(start, end)}{label_str}")
             else:
                 lines.append(f"_No holidays {week_label.lower()}._")
             return lines
@@ -156,7 +156,7 @@ def job_daily_reminders() -> None:
         aliases = database.get_all_aliases()
 
         def _name(row) -> str:
-            return aliases.get(row["user_id"], row["username"])
+            return aliases.get(row["user_id"], f"@{row['username']}")
 
         if hols_7:
             lines.append(f"**:hourglass: One week away (starting {_fmt_date(target_7)}):**")
@@ -165,7 +165,7 @@ def job_daily_reminders() -> None:
                 end   = date.fromisoformat(row["end_date"])
                 label_str = f" _({row['label']})_" if row["label"] else ""
                 lines.append(
-                    f"- @{_name(row)}: off from **{_fmt_date(start)}** "
+                    f"- {_name(row)}: off from **{_fmt_date(start)}** "
                     f"until **{_fmt_date(end)}** (inclusive){label_str}"
                 )
             lines.append("")
@@ -177,7 +177,7 @@ def job_daily_reminders() -> None:
                 end   = date.fromisoformat(row["end_date"])
                 label_str = f" _({row['label']})_" if row["label"] else ""
                 lines.append(
-                    f"- @{_name(row)}: off from **{_fmt_date(start)}** "
+                    f"- {_name(row)}: off from **{_fmt_date(start)}** "
                     f"until **{_fmt_date(end)}** (inclusive){label_str}"
                 )
 

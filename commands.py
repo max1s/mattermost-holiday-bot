@@ -48,9 +48,9 @@ def _fmt_date(d: date) -> str:
 
 
 def _display_name(user_id: str, username: str) -> str:
-    """Return the user's alias if set, otherwise their Mattermost username."""
+    """Return the user's alias if set, otherwise @username."""
     alias = database.get_alias(user_id)
-    return alias if alias else username
+    return alias if alias else f"@{username}"
 
 
 def _fmt_date_range(start: date, end: date) -> str:
@@ -217,8 +217,8 @@ def cmd_holiday_list(user_id: str, text: str) -> dict:
             start = date.fromisoformat(row["start_date"])
             end = date.fromisoformat(row["end_date"])
             label_str = f" _({row['label']})_" if row["label"] else ""
-            name = aliases.get(row["user_id"], row["username"])
-            lines.append(f"- @{name}: {_fmt_date_range(start, end)}{label_str}")
+            name = aliases.get(row["user_id"], f"@{row['username']}")
+            lines.append(f"- {name}: {_fmt_date_range(start, end)}{label_str}")
         return _resp("\n".join(lines))
 
     # Specific name — try alias lookup first, fall back to username column
@@ -321,7 +321,7 @@ def cmd_away_today() -> dict:
         end = date.fromisoformat(row["end_date"])
         label_str = f" _({row['label']})_" if row["label"] else ""
         name = _display_name(row["user_id"], row["username"])
-        lines.append(f"- @{name}: {_fmt_date_range(start, end)}{label_str}")
+        lines.append(f"- {name}: {_fmt_date_range(start, end)}{label_str}")
 
     return _resp("\n".join(lines), response_type="in_channel")
 
@@ -374,7 +374,7 @@ def cmd_holiday_user_rename(user_id: str, username: str, text: str) -> dict:
         )
     was_update = database.set_alias(user_id, alias)
     action = "updated" if was_update else "set"
-    return _resp(f":white_check_mark: Display name {action} to **@{alias}**.")
+    return _resp(f":white_check_mark: Display name {action} to **{alias}**.")
 
 
 def cmd_holiday_notify(user_id: str, username: str, text: str) -> dict:
