@@ -74,7 +74,9 @@ def help_text() -> str:
         ":calendar: **Holiday Bot — Commands**\n\n"
         "**Holidays**\n"
         f"- `/holiday-add <{fmt}> [{fmt}] [label]` — Add a holiday (single day or range, label optional)\n"
-        "- `/holiday-list` — List your upcoming holidays with their IDs\n"
+        "- `/holiday-list` — List your upcoming holidays\n"
+        "- `/holiday-list all` — List everyone's upcoming holidays\n"
+        "- `/holiday-list @username` — List a specific person's upcoming holidays\n"
         "- `/holiday-delete <ID>` — Delete one of your holidays by ID\n\n"
         "**Birthdays**\n"
         f"- `/birthday-set <{fmt}>` — Set or update your birthday\n"
@@ -180,23 +182,45 @@ def cmd_holiday_add(user_id: str, username: str, text: str) -> dict:
 # /holiday-list
 # ---------------------------------------------------------------------------
 
-def cmd_holiday_list(user_id: str) -> dict:
+def cmd_holiday_list(user_id: str, text: str) -> dict:
     today = _today()
-    rows = database.get_upcoming_holidays(user_id, today)
+    arg = text.strip().lstrip("@").lower()
 
+    if not arg:
+        rows = database.get_upcoming_holidays(user_id, today)
+        if not rows:
+            return _resp(":white_check_mark: You have no upcoming holidays registered.")
+        lines = [":desert_island: **Your upcoming holidays:**\n"]
+        for row in rows:
+            start = date.fromisoformat(row["start_date"])
+            end = date.fromisoformat(row["end_date"])
+            label_str = f" _({row['label']})_" if row["label"] else ""
+            lines.append(f"- **{row['id']}** — {_fmt_date_range(start, end)}{label_str}")
+        lines.append("\n_Use `/holiday-delete <ID>` to remove one._")
+        return _resp("\n".join(lines))
+
+    if arg == "all":
+        rows = database.get_all_upcoming_holidays(today)
+        if not rows:
+            return _resp(":white_check_mark: No upcoming holidays registered.")
+        lines = [":desert_island: **All upcoming holidays:**\n"]
+        for row in rows:
+            start = date.fromisoformat(row["start_date"])
+            end = date.fromisoformat(row["end_date"])
+            label_str = f" _({row['label']})_" if row["label"] else ""
+            lines.append(f"- @{row['username']}: {_fmt_date_range(start, end)}{label_str}")
+        return _resp("\n".join(lines))
+
+    # Specific username
+    rows = database.get_upcoming_holidays_by_username(arg, today)
     if not rows:
-        return _resp(":white_check_mark: You have no upcoming holidays registered.")
-
-    lines = [":desert_island: **Your upcoming holidays:**\n"]
-    lines.append("| ID | Dates | Label |")
-    lines.append("|----|-------|-------|")
+        return _resp(f":white_check_mark: No upcoming holidays found for @{arg}.")
+    lines = [f":desert_island: **Upcoming holidays for @{arg}:**\n"]
     for row in rows:
         start = date.fromisoformat(row["start_date"])
         end = date.fromisoformat(row["end_date"])
-        label = row["label"] or ""
-        lines.append(f"| {row['id']} | {_fmt_date_range(start, end)} | {label} |")
-
-    lines.append("\nUse `/holiday-delete <ID>` to remove one.")
+        label_str = f" _({row['label']})_" if row["label"] else ""
+        lines.append(f"- {_fmt_date_range(start, end)}{label_str}")
     return _resp("\n".join(lines))
 
 

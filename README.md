@@ -9,7 +9,9 @@ A Mattermost bot that lets your team track holidays and birthdays via slash comm
 | Command | Description |
 |---------|-------------|
 | `/holiday-add <DD-MM-YYYY> [DD-MM-YYYY] [label]` | Add a holiday (single day or date range, optional label) |
-| `/holiday-list` | List your upcoming holidays with their IDs |
+| `/holiday-list` | List your own upcoming holidays |
+| `/holiday-list all` | List everyone's upcoming holidays |
+| `/holiday-list @username` | List a specific person's upcoming holidays |
 | `/holiday-delete <ID>` | Delete one of your holidays |
 | `/holiday-help` | Show full help for all commands |
 | `/birthday-set <DD-MM-YYYY>` | Set or update your birthday |
@@ -187,6 +189,8 @@ curl -X POST http://localhost:5000/slash/away-today \
 /holiday-add 2026-08-03 2026-08-07 Summer holiday
 
 /holiday-list
+/holiday-list all
+/holiday-list @alice
 /holiday-delete 42
 
 /birthday-set 1990-07-04

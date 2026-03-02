@@ -177,6 +177,30 @@ def delete_holiday(holiday_id: int, user_id: str) -> bool:
     return cursor.rowcount > 0
 
 
+def get_all_upcoming_holidays(today: date) -> list[sqlite3.Row]:
+    """Return all upcoming holidays for all users, ordered by start_date then username."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM holidays "
+            "WHERE end_date >= ? "
+            "ORDER BY start_date, username",
+            (today.isoformat(),),
+        ).fetchall()
+    return rows
+
+
+def get_upcoming_holidays_by_username(username: str, today: date) -> list[sqlite3.Row]:
+    """Return upcoming holidays for a specific username, ordered by start_date."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM holidays "
+            "WHERE username = ? AND end_date >= ? "
+            "ORDER BY start_date",
+            (username, today.isoformat()),
+        ).fetchall()
+    return rows
+
+
 def get_holidays_overlapping_range(start: date, end: date) -> list[sqlite3.Row]:
     """
     Return all holidays (all users) that overlap with [start, end].

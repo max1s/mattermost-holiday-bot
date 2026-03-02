@@ -79,7 +79,7 @@ def route_holiday_add():
 @app.route("/slash/holiday-list", methods=["POST"])
 def route_holiday_list():
     user_id, username, text = _guard("holiday-list")
-    return _handle(lambda: commands.cmd_holiday_list(user_id))
+    return _handle(lambda: commands.cmd_holiday_list(user_id, text))
 
 
 @app.route("/slash/holiday-delete", methods=["POST"])
