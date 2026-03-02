@@ -94,6 +94,7 @@ SLASH_TOKENS: dict[str, str] = {
     "holiday-delete": _require("SLASH_TOKEN_HOLIDAY_DELETE"),
     "holiday-help":   _require("SLASH_TOKEN_HOLIDAY_HELP"),
     "holiday-notify": _require("SLASH_TOKEN_HOLIDAY_NOTIFY"),
+    "holiday-user-rename": _require("SLASH_TOKEN_HOLIDAY_USER_RENAME"),
     "birthday-set":   _require("SLASH_TOKEN_BIRTHDAY_SET"),
     "birthday-delete": _require("SLASH_TOKEN_BIRTHDAY_DELETE"),
     "away-today":     _require("SLASH_TOKEN_AWAY_TODAY"),

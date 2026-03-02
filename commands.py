@@ -47,6 +47,12 @@ def _fmt_date(d: date) -> str:
     return d.strftime(config.DATE_FORMAT)
 
 
+def _display_name(user_id: str, username: str) -> str:
+    """Return the user's alias if set, otherwise their Mattermost username."""
+    alias = database.get_alias(user_id)
+    return alias if alias else username
+
+
 def _fmt_date_range(start: date, end: date) -> str:
     """Format a date range. Single date if start == end, otherwise 'start – end'."""
     if start == end:
@@ -84,6 +90,8 @@ def help_text() -> str:
         "**Queries**\n"
         "- `/away-today` — See everyone who is away today (posts to channel)\n"
         "- `/holiday-help` — Show this help message\n\n"
+        "**Settings**\n"
+        "- `/holiday-user-rename <display-name>` — Set a display name alias for yourself\n\n"
         "**Experimental**\n"
         f"- `/holiday-notify <{fmt}> [{fmt}] [label]` — Add a holiday and notify the company administrator\n\n"
         "**Scheduled Announcements**\n"
@@ -204,15 +212,21 @@ def cmd_holiday_list(user_id: str, text: str) -> dict:
         if not rows:
             return _resp(":white_check_mark: No upcoming holidays registered.")
         lines = [":desert_island: **All upcoming holidays:**\n"]
+        aliases = database.get_all_aliases()
         for row in rows:
             start = date.fromisoformat(row["start_date"])
             end = date.fromisoformat(row["end_date"])
             label_str = f" _({row['label']})_" if row["label"] else ""
-            lines.append(f"- @{row['username']}: {_fmt_date_range(start, end)}{label_str}")
+            name = aliases.get(row["user_id"], row["username"])
+            lines.append(f"- @{name}: {_fmt_date_range(start, end)}{label_str}")
         return _resp("\n".join(lines))
 
-    # Specific username
-    rows = database.get_upcoming_holidays_by_username(arg, today)
+    # Specific name — try alias lookup first, fall back to username column
+    target_user_id = database.get_user_id_by_name(arg)
+    if target_user_id:
+        rows = database.get_upcoming_holidays_by_user_id(target_user_id, today)
+    else:
+        rows = database.get_upcoming_holidays_by_username(arg, today)
     if not rows:
         return _resp(f":white_check_mark: No upcoming holidays found for @{arg}.")
     lines = [f":desert_island: **Upcoming holidays for @{arg}:**\n"]
@@ -306,7 +320,8 @@ def cmd_away_today() -> dict:
         start = date.fromisoformat(row["start_date"])
         end = date.fromisoformat(row["end_date"])
         label_str = f" _({row['label']})_" if row["label"] else ""
-        lines.append(f"- @{row['username']}: {_fmt_date_range(start, end)}{label_str}")
+        name = _display_name(row["user_id"], row["username"])
+        lines.append(f"- @{name}: {_fmt_date_range(start, end)}{label_str}")
 
     return _resp("\n".join(lines), response_type="in_channel")
 
@@ -345,6 +360,21 @@ def _send_admin_email(
         if config.SMTP_USER and config.SMTP_PASSWORD:
             smtp.login(config.SMTP_USER, config.SMTP_PASSWORD)
         smtp.sendmail(config.SMTP_FROM, to_email, msg.as_string())
+
+
+def cmd_holiday_user_rename(user_id: str, username: str, text: str) -> dict:
+    """Set a display name alias for the invoking user."""
+    alias = text.strip().lstrip("@")
+    if not alias:
+        current = database.get_alias(user_id)
+        current_str = f" Currently set to **@{current}**." if current else " No alias set."
+        return _resp(
+            f"Usage: `/holiday-user-rename <display-name>`\n"
+            f"Sets the name shown for you in all holiday bot output.{current_str}"
+        )
+    was_update = database.set_alias(user_id, alias)
+    action = "updated" if was_update else "set"
+    return _resp(f":white_check_mark: Display name {action} to **@{alias}**.")
 
 
 def cmd_holiday_notify(user_id: str, username: str, text: str) -> dict:

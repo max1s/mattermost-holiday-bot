@@ -13,6 +13,7 @@ A Mattermost bot that lets your team track holidays and birthdays via slash comm
 | `/holiday-list all` | List everyone's upcoming holidays |
 | `/holiday-list @username` | List a specific person's upcoming holidays |
 | `/holiday-delete <ID>` | Delete one of your holidays |
+| `/holiday-user-rename <display-name>` | Set a display name alias used in all bot output |
 | `/holiday-help` | Show full help for all commands |
 | `/birthday-set <DD-MM-YYYY>` | Set or update your birthday |
 | `/birthday-delete` | Remove your birthday |

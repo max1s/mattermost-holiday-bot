@@ -94,6 +94,12 @@ def route_holiday_help():
     return _handle(lambda: commands.cmd_help())
 
 
+@app.route("/slash/holiday-user-rename", methods=["POST"])
+def route_holiday_user_rename():
+    user_id, username, text = _guard("holiday-user-rename")
+    return _handle(lambda: commands.cmd_holiday_user_rename(user_id, username, text))
+
+
 @app.route("/slash/holiday-notify", methods=["POST"])
 def route_holiday_notify():
     user_id, username, text = _guard("holiday-notify")

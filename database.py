@@ -39,6 +39,14 @@ def init_db() -> None:
                 birth_date TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS user_aliases (
+                user_id  TEXT PRIMARY KEY,
+                alias    TEXT NOT NULL COLLATE NOCASE
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_user_aliases_alias
+                ON user_aliases(alias COLLATE NOCASE);
+
             CREATE TABLE IF NOT EXISTS holidays (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    TEXT NOT NULL,
@@ -55,6 +63,46 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_holidays_end
                 ON holidays(end_date);
         """)
+
+
+# ---------------------------------------------------------------------------
+# User aliases
+# ---------------------------------------------------------------------------
+
+def set_alias(user_id: str, alias: str) -> bool:
+    """Set or update a display name alias. Returns True if this was an update."""
+    existing = get_alias(user_id)
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO user_aliases (user_id, alias) VALUES (?, ?)",
+            (user_id, alias),
+        )
+    return existing is not None
+
+
+def get_alias(user_id: str) -> str | None:
+    """Return the alias for a user_id, or None if not set."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT alias FROM user_aliases WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    return row["alias"] if row else None
+
+
+def get_user_id_by_name(name: str) -> str | None:
+    """Look up a user_id by alias (case-insensitive). Returns None if not found."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM user_aliases WHERE alias = ?", (name,)
+        ).fetchone()
+    return row["user_id"] if row else None
+
+
+def get_all_aliases() -> dict[str, str]:
+    """Return a dict of user_id -> alias for all users with aliases set."""
+    with _conn() as conn:
+        rows = conn.execute("SELECT user_id, alias FROM user_aliases").fetchall()
+    return {row["user_id"]: row["alias"] for row in rows}
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +233,18 @@ def get_all_upcoming_holidays(today: date) -> list[sqlite3.Row]:
             "WHERE end_date >= ? "
             "ORDER BY start_date, username",
             (today.isoformat(),),
+        ).fetchall()
+    return rows
+
+
+def get_upcoming_holidays_by_user_id(user_id: str, today: date) -> list[sqlite3.Row]:
+    """Return upcoming holidays for a specific user_id, ordered by start_date."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM holidays "
+            "WHERE user_id = ? AND end_date >= ? "
+            "ORDER BY start_date",
+            (user_id, today.isoformat()),
         ).fetchall()
     return rows
 
