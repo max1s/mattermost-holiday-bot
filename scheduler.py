@@ -43,6 +43,16 @@ def _fmt_date_range(start: date, end: date) -> str:
     return f"{_fmt_date(start)} – {_fmt_date(end)}"
 
 
+def _fmt_date_with_day(d: date) -> str:
+    return f"{d.strftime('%a')}, {_fmt_date(d)}"
+
+
+def _fmt_reminder_range(start: date, end: date) -> str:
+    if start == end:
+        return _fmt_date_with_day(start)
+    return f"{_fmt_date_with_day(start)} -- {_fmt_date_with_day(end)}"
+
+
 def _fmt_birthday_date(birth_date_str: str) -> str:
     """Format a birthday as day + month name, e.g. '04 Jul'. Always human-readable."""
     bday = date.fromisoformat(birth_date_str)
@@ -67,63 +77,38 @@ def job_weekly_summary() -> None:
         bdays_this = database.get_birthdays_in_range(this_mon, this_sun)
         bdays_next = database.get_birthdays_in_range(next_mon, next_sun)
         hols_this  = database.get_holidays_overlapping_range(this_mon, this_sun)
-        hols_next  = database.get_holidays_overlapping_range(next_mon, next_sun)
+        this_ids   = {row["id"] for row in hols_this}
+        hols_next  = [r for r in database.get_holidays_overlapping_range(next_mon, next_sun)
+                      if r["id"] not in this_ids]
 
         if not any([bdays_this, bdays_next, hols_this, hols_next]):
             logger.info("Weekly summary: nothing to report.")
             return
 
-        header = (
-            f"### :calendar: Weekly Update — "
-            f"{_fmt_date_range(this_mon, this_sun)}\n"
-        )
-
-        sections: list[str] = [header]
-
-        # --- Birthdays ---
-        sections.append("#### :birthday: Birthdays\n")
-
         aliases = database.get_all_aliases()
 
         def _name(row) -> str:
-            return aliases.get(row["user_id"], f"@{row['username']}")
+            return f"@{aliases.get(row['user_id'], row['username'])}"
 
-        def _birthday_lines(rows: list, week_label: str) -> list[str]:
-            lines = [f"**{week_label}:**"]
-            if rows:
-                for row in rows:
-                    lines.append(f"- {_name(row)} ({_fmt_birthday_date(row['birth_date'])})")
-            else:
-                lines.append(f"_No birthdays {week_label.lower()}._")
-            return lines
+        def _duration(start: date, end: date) -> str:
+            days = (end - start).days + 1
+            return f"{days} day" if days == 1 else f"{days} days"
 
-        sections.extend(_birthday_lines(bdays_this, "This Week"))
-        sections.append("")
-        sections.extend(_birthday_lines(bdays_next, "Next Week"))
-        sections.append("")
 
-        # --- Holidays ---
-        sections.append("#### :desert_island: Holidays\n")
+        for row in hols_this:
+            start = date.fromisoformat(row["start_date"])
+            end   = date.fromisoformat(row["end_date"])
+            mattermost.post_to_announcement_channel(
+                f"{_name(row)}: off **this week** for **{_duration(start, end)}** ({_fmt_reminder_range(start, end)})"
+            )
 
-        def _holiday_lines(rows: list, week_label: str) -> list[str]:
-            lines = [f"**{week_label}:**"]
-            if rows:
-                for row in rows:
-                    start = date.fromisoformat(row["start_date"])
-                    end   = date.fromisoformat(row["end_date"])
-                    label_str = f" _({row['label']})_" if row["label"] else ""
-                    lines.append(f"- {_name(row)}: {_fmt_date_range(start, end)}{label_str}")
-            else:
-                lines.append(f"_No holidays {week_label.lower()}._")
-            return lines
+        for row in hols_next:
+            start = date.fromisoformat(row["start_date"])
+            end   = date.fromisoformat(row["end_date"])
+            mattermost.post_to_announcement_channel(
+                f"{_name(row)}: off **next week** for **{_duration(start, end)}** ({_fmt_reminder_range(start, end)})"
+            )
 
-        sections.extend(_holiday_lines(hols_this, "This Week"))
-        sections.append("")
-        sections.extend(_holiday_lines(hols_next, "Next Week"))
-        sections.append("")
-        sections.append(f"---\n_Next summary: Monday {_fmt_date(next_mon)}_")
-
-        mattermost.post_to_announcement_channel("\n".join(sections))
         logger.info("Weekly summary posted.")
 
     except Exception:
@@ -137,7 +122,7 @@ def job_weekly_summary() -> None:
 def job_daily_reminders() -> None:
     """
     Post holiday reminders for holidays starting exactly 7 days or 1 day from today.
-    If nothing is due, no message is posted.
+    One message per person, no grouped headers.
     """
     try:
         today    = _today()
@@ -151,37 +136,30 @@ def job_daily_reminders() -> None:
             logger.debug("Daily reminders: nothing to report for %s.", today)
             return
 
-        lines = ["### :bell: Holiday Reminders\n"]
-
         aliases = database.get_all_aliases()
 
         def _name(row) -> str:
-            return aliases.get(row["user_id"], f"@{row['username']}")
+            return f"@{aliases.get(row['user_id'], row['username'])}"
 
-        if hols_7:
-            lines.append(f"**:hourglass: One week away (starting {_fmt_date(target_7)}):**")
-            for row in hols_7:
-                start = date.fromisoformat(row["start_date"])
-                end   = date.fromisoformat(row["end_date"])
-                label_str = f" _({row['label']})_" if row["label"] else ""
-                lines.append(
-                    f"- {_name(row)}: off from **{_fmt_date(start)}** "
-                    f"until **{_fmt_date(end)}** (inclusive){label_str}"
-                )
-            lines.append("")
+        def _duration(start: date, end: date) -> str:
+            days = (end - start).days + 1
+            return f"{days} day" if days == 1 else f"{days} days"
 
-        if hols_1:
-            lines.append(f"**:alarm_clock: Starting tomorrow ({_fmt_date(target_1)}):**")
-            for row in hols_1:
-                start = date.fromisoformat(row["start_date"])
-                end   = date.fromisoformat(row["end_date"])
-                label_str = f" _({row['label']})_" if row["label"] else ""
-                lines.append(
-                    f"- {_name(row)}: off from **{_fmt_date(start)}** "
-                    f"until **{_fmt_date(end)}** (inclusive){label_str}"
-                )
 
-        mattermost.post_to_announcement_channel("\n".join(lines))
+        for row in hols_7:
+            start = date.fromisoformat(row["start_date"])
+            end   = date.fromisoformat(row["end_date"])
+            mattermost.post_to_announcement_channel(
+                f"{_name(row)}: off in **1 week** for **{_duration(start, end)}** ({_fmt_reminder_range(start, end)})"
+            )
+
+        for row in hols_1:
+            start = date.fromisoformat(row["start_date"])
+            end   = date.fromisoformat(row["end_date"])
+            mattermost.post_to_announcement_channel(
+                f"{_name(row)}: off **tomorrow** for **{_duration(start, end)}** ({_fmt_reminder_range(start, end)})"
+            )
+
         logger.info("Daily reminders posted (7-day: %d, 1-day: %d).", len(hols_7), len(hols_1))
 
     except Exception:

@@ -48,9 +48,9 @@ def _fmt_date(d: date) -> str:
 
 
 def _display_name(user_id: str, username: str) -> str:
-    """Return the user's alias if set, otherwise @username."""
+    """Return the user's alias (with @) if set, otherwise @username."""
     alias = database.get_alias(user_id)
-    return alias if alias else f"@{username}"
+    return f"@{alias}" if alias else f"@{username}"
 
 
 def _fmt_date_range(start: date, end: date) -> str:
@@ -58,6 +58,16 @@ def _fmt_date_range(start: date, end: date) -> str:
     if start == end:
         return _fmt_date(start)
     return f"{_fmt_date(start)} – {_fmt_date(end)}"
+
+
+def _fmt_date_with_day(d: date) -> str:
+    return f"{d.strftime('%a')}, {_fmt_date(d)}"
+
+
+def _fmt_range_with_day(start: date, end: date) -> str:
+    if start == end:
+        return _fmt_date_with_day(start)
+    return f"{_fmt_date_with_day(start)} -- {_fmt_date_with_day(end)}"
 
 
 def _example(d: date) -> str:
@@ -203,7 +213,7 @@ def cmd_holiday_list(user_id: str, text: str) -> dict:
             start = date.fromisoformat(row["start_date"])
             end = date.fromisoformat(row["end_date"])
             label_str = f" _({row['label']})_" if row["label"] else ""
-            lines.append(f"- **{row['id']}** — {_fmt_date_range(start, end)}{label_str}")
+            lines.append(f"- **{row['id']}** — {_fmt_range_with_day(start, end)}{label_str}")
         lines.append("\n_Use `/holiday-delete <ID>` to remove one._")
         return _resp("\n".join(lines))
 
@@ -217,8 +227,8 @@ def cmd_holiday_list(user_id: str, text: str) -> dict:
             start = date.fromisoformat(row["start_date"])
             end = date.fromisoformat(row["end_date"])
             label_str = f" _({row['label']})_" if row["label"] else ""
-            name = aliases.get(row["user_id"], f"@{row['username']}")
-            lines.append(f"- {name}: {_fmt_date_range(start, end)}{label_str}")
+            name = f"@{aliases.get(row['user_id'], row['username'])}"
+            lines.append(f"- {name}: {_fmt_range_with_day(start, end)}{label_str}")
         return _resp("\n".join(lines))
 
     # Specific name — try alias lookup first, fall back to username column
@@ -235,7 +245,7 @@ def cmd_holiday_list(user_id: str, text: str) -> dict:
         start = date.fromisoformat(row["start_date"])
         end = date.fromisoformat(row["end_date"])
         label_str = f" _({row['label']})_" if row["label"] else ""
-        lines.append(f"- {_fmt_date_range(start, end)}{label_str}")
+        lines.append(f"- {_fmt_range_with_day(start, end)}{label_str}")
     return _resp("\n".join(lines))
 
 
