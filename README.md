@@ -29,6 +29,20 @@ A Mattermost bot that lets your team track holidays and birthdays via slash comm
   - One-week reminder when someone's holiday starts in 7 days
   - One-day reminder when someone's holiday starts tomorrow
 
+### Public / Bank Holidays
+
+Public holidays for the following locales are auto-included in `/holiday-list all`, `/away-today`, and the Monday weekly summary — no setup required:
+
+- 🇺🇸 US (federal)
+- 🇬🇧 England
+- 🇬🇧 Scotland
+- 🇫🇷 France
+- 🇩🇪 Germany — Baden-Württemberg
+
+Same-flag/same-name entries on the same date are merged (e.g. England + Scotland sharing May Day appears as a single line). To add or remove jurisdictions, edit the `LOCALES` list at the top of `public_holidays.py`. Backed by the [`holidays`](https://pypi.org/project/holidays/) package.
+
+> See [`CHANGELOG.md`](CHANGELOG.md) for recent user-visible changes.
+
 ---
 
 ## Setup
@@ -75,6 +89,7 @@ For each command, set:
 | `holiday-delete` | `/slash/holiday-delete` | `SLASH_TOKEN_HOLIDAY_DELETE` |
 | `holiday-help` | `/slash/holiday-help` | `SLASH_TOKEN_HOLIDAY_HELP` |
 | `holiday-notify` | `/slash/holiday-notify` | `SLASH_TOKEN_HOLIDAY_NOTIFY` |
+| `holiday-user-rename` | `/slash/holiday-user-rename` | `SLASH_TOKEN_HOLIDAY_USER_RENAME` |
 | `birthday-set` | `/slash/birthday-set` | `SLASH_TOKEN_BIRTHDAY_SET` |
 | `birthday-delete` | `/slash/birthday-delete` | `SLASH_TOKEN_BIRTHDAY_DELETE` |
 | `away-today` | `/slash/away-today` | `SLASH_TOKEN_AWAY_TODAY` |
@@ -118,6 +133,7 @@ SLASH_TOKEN_HOLIDAY_LIST=token_from_mattermost
 SLASH_TOKEN_HOLIDAY_DELETE=token_from_mattermost
 SLASH_TOKEN_HOLIDAY_HELP=token_from_mattermost
 SLASH_TOKEN_HOLIDAY_NOTIFY=token_from_mattermost
+SLASH_TOKEN_HOLIDAY_USER_RENAME=token_from_mattermost
 SLASH_TOKEN_BIRTHDAY_SET=token_from_mattermost
 SLASH_TOKEN_BIRTHDAY_DELETE=token_from_mattermost
 SLASH_TOKEN_AWAY_TODAY=token_from_mattermost

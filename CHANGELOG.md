@@ -2,6 +2,13 @@
 
 Running log of user-visible changes, newest first. Each entry covers a deployment cycle (kill bot → edit → restart). Older changes that predate this log live in `git log`.
 
+## 2026-04-30 (docs)
+
+### Documentation
+- README: documented public/bank-holiday support (locales, dedup behaviour, where they appear).
+- README + `.env.example`: added the missing `holiday-user-rename` slash command to the registration table and `SLASH_TOKEN_HOLIDAY_USER_RENAME` env var (the command itself has been live since `b0810e6`; only the setup docs were out of date).
+- README: link to `CHANGELOG.md`.
+
 ## 2026-04-30
 
 ### Added
