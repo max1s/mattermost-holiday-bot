@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 import config
 import database
 import mattermost
+import public_holidays
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,62 @@ def _fmt_date_with_day(d: date) -> str:
     return f"{d.strftime('%a')}, {_fmt_date(d)}"
 
 
-def _fmt_reminder_range(start: date, end: date) -> str:
+def _fmt_reminder_range(start: date, end: date, sp: str = "full", ep: str = "full") -> str:
+    """Day-prefixed range, with partial-day markers on the boundary days when set."""
     if start == end:
-        return _fmt_date_with_day(start)
-    return f"{_fmt_date_with_day(start)} -- {_fmt_date_with_day(end)}"
+        if sp == "full":
+            return _fmt_date_with_day(start)
+        return f"{_fmt_date_with_day(start)} ({sp})"
+    s = _fmt_date_with_day(start) + (f" ({sp})" if sp != "full" else "")
+    e = _fmt_date_with_day(end)   + (f" ({ep})" if ep != "full" else "")
+    return f"{s} -- {e}"
+
+
+def _format_days(days_off: float) -> str:
+    """Render a (possibly half) day count as '1 day' / '3 days' / '2.5 days'."""
+    if days_off == int(days_off):
+        n = int(days_off)
+        return f"{n} day" if n == 1 else f"{n} days"
+    return f"{days_off} days"
+
+
+def _duration_days(start: date, end: date, sp: str, ep: str) -> float:
+    n = (end - start).days + 1
+    return n - 0.5 * (sp == "afternoon") - 0.5 * (ep == "morning")
+
+
+def _row_part(row, key: str) -> str:
+    try:
+        v = row[key]
+    except (IndexError, KeyError):
+        return "full"
+    return v or "full"
+
+
+def _holiday_message(
+    name: str, timing: str, start: date, end: date, label: str | None,
+    *, effective_start: date | None = None, duration_suffix: str = "",
+    start_part: str = "full", end_part: str = "full",
+) -> str:
+    """Build a single holiday announcement line, with partial-day markers."""
+    clean = (label or "").strip().strip('"')
+    suffix = f" — {clean}" if clean else ""
+
+    # Same-day half-day: keep the legacy "**half day** (am|pm)" phrasing,
+    # and drop the redundant part suffix from the date range itself.
+    if start == end and start_part != "full":
+        return (
+            f"{name}: off **{timing}** for a **half day** "
+            f"({start_part}) ({_fmt_reminder_range(start, end)}){suffix}"
+        )
+
+    dur_start = effective_start if effective_start is not None else start
+    days_off = _duration_days(dur_start, end, start_part, end_part)
+    duration = _format_days(days_off) + duration_suffix
+    return (
+        f"{name}: off **{timing}** for **{duration}** "
+        f"({_fmt_reminder_range(start, end, start_part, end_part)}){suffix}"
+    )
 
 
 def _fmt_birthday_date(birth_date_str: str) -> str:
@@ -76,38 +129,73 @@ def job_weekly_summary() -> None:
 
         bdays_this = database.get_birthdays_in_range(this_mon, this_sun)
         bdays_next = database.get_birthdays_in_range(next_mon, next_sun)
-        hols_this  = database.get_holidays_overlapping_range(this_mon, this_sun)
+        # Drop holidays whose end_date has already passed — they overlap "this
+        # week" by date arithmetic but aren't relevant to a forward-looking
+        # summary (and would yield negative durations on the in-progress branch).
+        hols_this  = [r for r in database.get_holidays_overlapping_range(this_mon, this_sun)
+                      if date.fromisoformat(r["end_date"]) >= today]
         this_ids   = {row["id"] for row in hols_this}
         hols_next  = [r for r in database.get_holidays_overlapping_range(next_mon, next_sun)
                       if r["id"] not in this_ids]
 
-        if not any([bdays_this, bdays_next, hols_this, hols_next]):
+        public_this = public_holidays.in_range(this_mon, this_sun)
+        public_next = public_holidays.in_range(next_mon, next_sun)
+
+        if not any([bdays_this, bdays_next, hols_this, hols_next, public_this, public_next]):
             logger.info("Weekly summary: nothing to report.")
             return
 
         aliases = database.get_all_aliases()
 
         def _name(row) -> str:
-            return f"@{aliases.get(row['user_id'], row['username'])}"
-
-        def _duration(start: date, end: date) -> str:
-            days = (end - start).days + 1
-            return f"{days} day" if days == 1 else f"{days} days"
-
+            alias = aliases.get(row["user_id"])
+            if alias:
+                return f"@{alias}"
+            current = mattermost.get_username(row["user_id"])
+            return f"@{current or row['username']}"
 
         for row in hols_this:
             start = date.fromisoformat(row["start_date"])
             end   = date.fromisoformat(row["end_date"])
+            if start < today:
+                timing = "this week"
+                effective_start = today
+                duration_suffix = " more"
+            else:
+                timing = "this week"
+                effective_start = None
+                duration_suffix = ""
             mattermost.post_to_announcement_channel(
-                f"{_name(row)}: off **this week** for **{_duration(start, end)}** ({_fmt_reminder_range(start, end)})"
+                _holiday_message(
+                    _name(row), timing, start, end, row["label"],
+                    effective_start=effective_start, duration_suffix=duration_suffix,
+                    start_part=_row_part(row, "start_part"),
+                    end_part=_row_part(row, "end_part"),
+                )
             )
 
         for row in hols_next:
             start = date.fromisoformat(row["start_date"])
             end   = date.fromisoformat(row["end_date"])
             mattermost.post_to_announcement_channel(
-                f"{_name(row)}: off **next week** for **{_duration(start, end)}** ({_fmt_reminder_range(start, end)})"
+                _holiday_message(
+                    _name(row), "next week", start, end, row["label"],
+                    start_part=_row_part(row, "start_part"),
+                    end_part=_row_part(row, "end_part"),
+                )
             )
+
+        if public_this:
+            lines = [":flags: **Public holidays this week:**"]
+            for d, label, flag, name in public_this:
+                lines.append(f"- {flag} {label}: {_fmt_date_with_day(d)} — {name}")
+            mattermost.post_to_announcement_channel("\n".join(lines))
+
+        if public_next:
+            lines = [":flags: **Public holidays next week:**"]
+            for d, label, flag, name in public_next:
+                lines.append(f"- {flag} {label}: {_fmt_date_with_day(d)} — {name}")
+            mattermost.post_to_announcement_channel("\n".join(lines))
 
         logger.info("Weekly summary posted.")
 
@@ -123,9 +211,13 @@ def job_daily_reminders() -> None:
     """
     Post holiday reminders for holidays starting exactly 7 days or 1 day from today.
     One message per person, no grouped headers.
+    Skipped on Mondays — the weekly summary already covers those holidays.
     """
     try:
         today    = _today()
+        if today.weekday() == 0:  # Monday
+            logger.debug("Daily reminders: skipping on Monday (covered by weekly summary).")
+            return
         target_7 = today + timedelta(days=7)
         target_1 = today + timedelta(days=1)
 
@@ -139,25 +231,32 @@ def job_daily_reminders() -> None:
         aliases = database.get_all_aliases()
 
         def _name(row) -> str:
-            return f"@{aliases.get(row['user_id'], row['username'])}"
-
-        def _duration(start: date, end: date) -> str:
-            days = (end - start).days + 1
-            return f"{days} day" if days == 1 else f"{days} days"
-
+            alias = aliases.get(row["user_id"])
+            if alias:
+                return f"@{alias}"
+            current = mattermost.get_username(row["user_id"])
+            return f"@{current or row['username']}"
 
         for row in hols_7:
             start = date.fromisoformat(row["start_date"])
             end   = date.fromisoformat(row["end_date"])
             mattermost.post_to_announcement_channel(
-                f"{_name(row)}: off in **1 week** for **{_duration(start, end)}** ({_fmt_reminder_range(start, end)})"
+                _holiday_message(
+                    _name(row), "in 1 week", start, end, row["label"],
+                    start_part=_row_part(row, "start_part"),
+                    end_part=_row_part(row, "end_part"),
+                )
             )
 
         for row in hols_1:
             start = date.fromisoformat(row["start_date"])
             end   = date.fromisoformat(row["end_date"])
             mattermost.post_to_announcement_channel(
-                f"{_name(row)}: off **tomorrow** for **{_duration(start, end)}** ({_fmt_reminder_range(start, end)})"
+                _holiday_message(
+                    _name(row), "tomorrow", start, end, row["label"],
+                    start_part=_row_part(row, "start_part"),
+                    end_part=_row_part(row, "end_part"),
+                )
             )
 
         logger.info("Daily reminders posted (7-day: %d, 1-day: %d).", len(hols_7), len(hols_1))

@@ -72,6 +72,29 @@ def get_bot_user_id() -> str:
     return _get_driver().users.get_user("me")["id"]
 
 
+_username_cache: dict[str, str] = {}
+
+
+def get_username(user_id: str) -> str | None:
+    """
+    Look up a user's current Mattermost username by ID. Cached for the
+    lifetime of the process so repeat calls in a single announcement are cheap.
+    Returns None if the user is unknown or the API call fails — callers
+    should fall back to a stored value.
+    """
+    cached = _username_cache.get(user_id)
+    if cached is not None:
+        return cached
+    try:
+        username = _get_driver().users.get_user(user_id).get("username")
+    except Exception:
+        logger.exception("Failed to look up username for user_id=%s", user_id)
+        return None
+    if username:
+        _username_cache[user_id] = username
+    return username
+
+
 def start_websocket_listener(handler: Callable[..., Coroutine]) -> threading.Thread:
     """
     Start the Mattermost WebSocket event listener in a background daemon thread.

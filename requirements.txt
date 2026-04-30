@@ -2,3 +2,4 @@ flask>=3.0.0
 mattermostdriver>=7.3.2
 APScheduler>=3.10.4
 python-dotenv>=1.0.0
+holidays>=0.50

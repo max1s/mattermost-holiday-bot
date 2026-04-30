@@ -54,6 +54,8 @@ def init_db() -> None:
                 start_date TEXT NOT NULL,
                 end_date   TEXT NOT NULL,
                 label      TEXT,
+                start_part TEXT NOT NULL DEFAULT 'full',
+                end_part   TEXT NOT NULL DEFAULT 'full',
                 CONSTRAINT chk_dates CHECK (start_date <= end_date)
             );
 
@@ -63,6 +65,26 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_holidays_end
                 ON holidays(end_date);
         """)
+        # Idempotent migration: add start_part/end_part to pre-existing holidays
+        # tables. SQLite's CREATE TABLE IF NOT EXISTS won't add new columns to
+        # an already-created table, so add them by hand if missing.
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(holidays)")}
+        if "start_part" not in cols:
+            conn.execute("ALTER TABLE holidays ADD COLUMN start_part TEXT NOT NULL DEFAULT 'full'")
+        if "end_part" not in cols:
+            conn.execute("ALTER TABLE holidays ADD COLUMN end_part   TEXT NOT NULL DEFAULT 'full'")
+        # Migrate legacy single-day half-days where the half-period was stored
+        # in the free-text label instead of the new columns. Case-insensitive
+        # match catches user variants like "Afternoon" or " morning ".
+        conn.execute(
+            "UPDATE holidays "
+            "   SET start_part = LOWER(TRIM(label)), "
+            "       end_part   = LOWER(TRIM(label)), "
+            "       label      = NULL "
+            " WHERE LOWER(TRIM(label)) IN ('morning','afternoon') "
+            "   AND start_date = end_date "
+            "   AND start_part = 'full' AND end_part = 'full'"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -178,13 +200,16 @@ def add_holiday(
     start_date: str,
     end_date: str,
     label: str | None,
+    start_part: str = "full",
+    end_part: str = "full",
 ) -> int:
     """Insert a holiday and return the new row ID."""
     with _conn() as conn:
         cursor = conn.execute(
-            "INSERT INTO holidays (user_id, username, start_date, end_date, label) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (user_id, username, start_date, end_date, label),
+            "INSERT INTO holidays "
+            "(user_id, username, start_date, end_date, label, start_part, end_part) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, username, start_date, end_date, label, start_part, end_part),
         )
     return cursor.lastrowid
 

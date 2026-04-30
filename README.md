@@ -8,7 +8,7 @@ A Mattermost bot that lets your team track holidays and birthdays via slash comm
 
 | Command | Description |
 |---------|-------------|
-| `/holiday-add <DD-MM-YYYY> [DD-MM-YYYY] [label]` | Add a holiday (single day or date range, optional label) |
+| `/holiday-add <DD-MM-YYYY[:am\|:pm]> [DD-MM-YYYY[:am\|:pm]] [label]` | Add a holiday. Append `:am` or `:pm` to a date for a half-day; combine on each end of a range to express partial-day boundaries (e.g. `:pm` start through `:am` end). |
 | `/holiday-list` | List your own upcoming holidays |
 | `/holiday-list all` | List everyone's upcoming holidays |
 | `/holiday-list @username` | List a specific person's upcoming holidays |
@@ -185,9 +185,14 @@ curl -X POST http://localhost:5000/slash/away-today \
 ## Command Examples
 
 ```
-/holiday-add 2026-08-03
-/holiday-add 2026-08-03 2026-08-07
-/holiday-add 2026-08-03 2026-08-07 Summer holiday
+/holiday-add 2026-08-03                            # one full day
+/holiday-add 2026-08-03 2026-08-07                 # 5-day range
+/holiday-add 2026-08-03 2026-08-07 Summer holiday  # range with label
+/holiday-add 2026-08-03:am                         # morning half-day
+/holiday-add 2026-08-03:pm                         # afternoon half-day
+/holiday-add 2026-08-03:pm 2026-08-07:am           # off from afternoon of Aug 3 through morning of Aug 7
+/holiday-add 2026-08-03:pm 2026-08-07              # afternoon-start, full last day
+/holiday-add 2026-08-03 2026-08-07:am              # full first day, morning-end last day
 
 /holiday-list
 /holiday-list all
@@ -199,6 +204,8 @@ curl -X POST http://localhost:5000/slash/away-today \
 
 /away-today
 ```
+
+> The `:am` / `:pm` suffix is shorthand for `:morning` / `:afternoon` — both forms are accepted. A bare date means a full day. On a multi-day range, only the partial boundaries (`:pm` on the start and/or `:am` on the end) carry information; `:am` on the start or `:pm` on the end of a multi-day range is normalised to a full boundary.
 
 ---
 

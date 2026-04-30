@@ -10,12 +10,14 @@ noted otherwise.
 
 import logging
 import smtplib
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import config
 import database
+import mattermost
+import public_holidays
 
 logger = logging.getLogger(__name__)
 
@@ -42,15 +44,48 @@ def _parse_date(token: str) -> date | None:
         return None
 
 
+_PART_ALIASES = {
+    "am": "morning", "morning": "morning",
+    "pm": "afternoon", "afternoon": "afternoon",
+    "full": "full", "": "full",
+}
+
+
+def _parse_date_token(token: str) -> tuple[date, str] | None:
+    """
+    Parse a token of the form 'DATE' or 'DATE:suffix' where suffix is one of
+    am, pm, morning, afternoon, full. Returns (date, part) on success, None
+    if the date is unparseable or the suffix is unknown.
+    """
+    if ":" in token:
+        date_str, _, raw = token.partition(":")
+        part = _PART_ALIASES.get(raw.strip().lower())
+        if part is None:
+            return None
+    else:
+        date_str, part = token, "full"
+    d = _parse_date(date_str)
+    if d is None:
+        return None
+    return d, part
+
+
 def _fmt_date(d: date) -> str:
     """Format a date using the configured DATE_FORMAT."""
     return d.strftime(config.DATE_FORMAT)
 
 
 def _display_name(user_id: str, username: str) -> str:
-    """Return the user's alias (with @) if set, otherwise @username."""
+    """
+    Return the user's alias (with @) if set, otherwise @<current-username>
+    looked up from Mattermost. Falls back to the stored username if the
+    live lookup fails (deleted user, network error, etc.).
+    """
     alias = database.get_alias(user_id)
-    return f"@{alias}" if alias else f"@{username}"
+    if alias:
+        return f"@{alias}"
+    current = mattermost.get_username(user_id)
+    return f"@{current or username}"
 
 
 def _fmt_date_range(start: date, end: date) -> str:
@@ -58,6 +93,19 @@ def _fmt_date_range(start: date, end: date) -> str:
     if start == end:
         return _fmt_date(start)
     return f"{_fmt_date(start)} – {_fmt_date(end)}"
+
+
+def _fmt_partial_range(
+    start: date, end: date, start_part: str, end_part: str
+) -> str:
+    """Format a date range with optional half-day markers on either boundary."""
+    if start == end:
+        if start_part == "full":
+            return _fmt_date(start)
+        return f"{_fmt_date(start)} ({start_part})"
+    s = _fmt_date(start) + (f" ({start_part})" if start_part != "full" else "")
+    e = _fmt_date(end)   + (f" ({end_part})"   if end_part   != "full" else "")
+    return f"{s} – {e}"
 
 
 def _fmt_date_with_day(d: date) -> str:
@@ -68,6 +116,28 @@ def _fmt_range_with_day(start: date, end: date) -> str:
     if start == end:
         return _fmt_date_with_day(start)
     return f"{_fmt_date_with_day(start)} -- {_fmt_date_with_day(end)}"
+
+
+def _row_part(row, key: str) -> str:
+    """Extract start_part/end_part from a row, defaulting to 'full' for legacy rows."""
+    try:
+        v = row[key]
+    except (IndexError, KeyError):
+        return "full"
+    return v or "full"
+
+
+def _fmt_partial_range_with_day(
+    start: date, end: date, start_part: str, end_part: str
+) -> str:
+    """Day-prefixed range with optional half-day markers on either boundary."""
+    if start == end:
+        if start_part == "full":
+            return _fmt_date_with_day(start)
+        return f"{_fmt_date_with_day(start)} ({start_part})"
+    s = _fmt_date_with_day(start) + (f" ({start_part})" if start_part != "full" else "")
+    e = _fmt_date_with_day(end)   + (f" ({end_part})"   if end_part   != "full" else "")
+    return f"{s} -- {e}"
 
 
 def _example(d: date) -> str:
@@ -89,7 +159,8 @@ def help_text() -> str:
     return (
         ":calendar: **Holiday Bot — Commands**\n\n"
         "**Holidays**\n"
-        f"- `/holiday-add <{fmt}> [{fmt}] [label]` — Add a holiday (single day or range, label optional)\n"
+        f"- `/holiday-add <{fmt}[:am|:pm]> [{fmt}[:am|:pm]] [label]` — Add a holiday "
+        "(single day, range, or partial boundaries; append `:am`/`:pm` for half days)\n"
         "- `/holiday-list` — List your upcoming holidays\n"
         "- `/holiday-list all` — List everyone's upcoming holidays\n"
         "- `/holiday-list @username` — List a specific person's upcoming holidays\n"
@@ -104,14 +175,21 @@ def help_text() -> str:
         "- `/holiday-user-rename <display-name>` — Set a display name alias for yourself\n\n"
         "**Experimental**\n"
         f"- `/holiday-notify <{fmt}> [{fmt}] [label]` — Add a holiday and notify the company administrator\n\n"
+        "**Public Holidays**\n"
+        "- US, England, Scotland, France, and Germany (Baden-Württemberg) bank/national holidays are shown in `/holiday-list all`, `/away-today`, and the weekly summary\n\n"
         "**Scheduled Announcements**\n"
         "- Monday 9AM — Weekly summary of birthdays and holidays for this week and next\n"
         "- Weekdays 9AM — Reminder when someone's holiday is 1 week or 1 day away\n\n"
         "**Examples**\n"
         f"```\n"
-        f"/holiday-add {ex_single}\n"
-        f"/holiday-add {ex_single} {ex_end}\n"
-        f"/holiday-add {ex_single} {ex_end} Summer holiday\n"
+        f"/holiday-add {ex_single}                          # one full day\n"
+        f"/holiday-add {ex_single} {ex_end}                # 5-day range\n"
+        f"/holiday-add {ex_single} {ex_end} Summer holiday # range with label\n"
+        f"/holiday-add {ex_single}:am                       # morning half-day\n"
+        f"/holiday-add {ex_single}:pm                       # afternoon half-day\n"
+        f"/holiday-add {ex_single}:pm {ex_end}:am          # afternoon-start, morning-end\n"
+        f"/holiday-add {ex_single}:pm {ex_end}             # afternoon-start, full last day\n"
+        f"/holiday-add {ex_single} {ex_end}:am             # full first day, morning-end\n"
         f"/birthday-set {ex_bday}\n"
         f"/away-today\n"
         "```"
@@ -131,51 +209,92 @@ def _holiday_add_usage() -> str:
     ex1 = _example(date(2026, 8, 3))
     ex2 = _example(date(2026, 8, 7))
     return (
-        f"Usage: `/holiday-add <{fmt}> [{fmt}] [label]`\n"
+        f"Usage: `/holiday-add <{fmt}[:am|:pm]> [{fmt}[:am|:pm]] [label]`\n"
         "Examples:\n"
         f"• `/holiday-add {ex1}` — single day off\n"
         f"• `/holiday-add {ex1} {ex2}` — date range\n"
-        f"• `/holiday-add {ex1} {ex2} Summer holiday` — with label"
+        f"• `/holiday-add {ex1} {ex2} Summer holiday` — with label\n"
+        f"• `/holiday-add {ex1}:am` — morning half-day\n"
+        f"• `/holiday-add {ex1}:pm` — afternoon half-day\n"
+        f"• `/holiday-add {ex1}:pm {ex2}:am` — afternoon of {ex1} through morning of {ex2}\n"
+        f"• `/holiday-add {ex1}:pm {ex2}` — afternoon-start, full last day\n"
+        f"• `/holiday-add {ex1} {ex2}:am` — full first day, morning of last\n"
+        "(`:am`/`:morning` and `:pm`/`:afternoon` are interchangeable)"
     )
 
 
-def _parse_holiday_args(text: str) -> tuple[date, date, str | None] | str:
+def _parse_holiday_args(
+    text: str,
+) -> tuple[date, date, str | None, str, str] | str:
     """
     Parse the argument string for /holiday-add and /holiday-notify.
-    Returns (start, end, label) on success, or an error/usage string on failure.
+
+    Returns (start_date, end_date, label, start_part, end_part) on success,
+    or an error/usage string on failure. start_part/end_part are one of
+    'full', 'morning', 'afternoon'.
     """
     if not text.strip():
         return _holiday_add_usage()
 
     parts = text.strip().split(maxsplit=2)
 
-    start = _parse_date(parts[0])
-    if start is None:
+    first = _parse_date_token(parts[0])
+    if first is None:
         return (
             f":x: Could not parse `{parts[0]}` as a date "
-            f"(expected format: `{config.DATE_FORMAT}`).\n\n"
+            f"(expected format: `{config.DATE_FORMAT}` with optional `:am`/`:pm` suffix).\n\n"
             + _holiday_add_usage()
         )
-
-    end: date = start
+    start, start_part = first
+    end, end_part = start, start_part
     label: str | None = None
 
     if len(parts) >= 2:
-        maybe_end = _parse_date(parts[1])
-        if maybe_end is not None:
-            end = maybe_end
+        second = _parse_date_token(parts[1])
+        if second is not None:
+            end, end_part = second
             if len(parts) == 3:
                 label = parts[2].strip() or None
         else:
-            label_parts = [parts[1]]
-            if len(parts) == 3:
-                label_parts.append(parts[2])
-            label = " ".join(label_parts).strip() or None
+            # parts[1] isn't a date — accept legacy `morning`/`afternoon`/`am`/`pm`
+            # keyword for a single-day half-day, otherwise treat as start of label.
+            tok = parts[1].strip().lower()
+            if tok in _PART_ALIASES and tok != "full" and tok != "":
+                if start_part != "full":
+                    return (
+                        f":x: You specified both `:{parts[0].split(':',1)[1]}` and `{parts[1]}` "
+                        "for the same date — pick one."
+                    )
+                resolved = _PART_ALIASES[tok]
+                start_part = end_part = resolved
+                if len(parts) == 3:
+                    label = parts[2].strip() or None
+            else:
+                label_parts = [parts[1]]
+                if len(parts) == 3:
+                    label_parts.append(parts[2])
+                label = " ".join(label_parts).strip() or None
 
     if end < start:
         return ":x: End date cannot be before start date."
 
-    return start, end, label
+    if start == end:
+        # Same-day combinations: am+pm = full (normalize); pm+am = error.
+        if start_part != end_part:
+            if start_part == "morning" and end_part == "afternoon":
+                start_part = end_part = "full"
+            else:
+                return ":x: Half-day order is reversed for a single date (got afternoon then morning)."
+    else:
+        # Multi-day: only the *partial* boundaries (afternoon-start / morning-end)
+        # convey new info. A 'morning' start or 'afternoon' end on a multi-day
+        # range is the same as 'full' — normalize so display & duration are clean.
+        if start_part == "morning":
+            start_part = "full"
+        if end_part == "afternoon":
+            end_part = "full"
+
+    return start, end, label, start_part, end_part
 
 
 # ---------------------------------------------------------------------------
@@ -187,12 +306,15 @@ def cmd_holiday_add(user_id: str, username: str, text: str) -> dict:
     if isinstance(parsed, str):
         return _resp(parsed)
 
-    start, end, label = parsed
-    holiday_id = database.add_holiday(user_id, username, start.isoformat(), end.isoformat(), label)
+    start, end, label, start_part, end_part = parsed
+    holiday_id = database.add_holiday(
+        user_id, username, start.isoformat(), end.isoformat(), label,
+        start_part=start_part, end_part=end_part,
+    )
     label_str = f": _{label}_" if label else ""
     return _resp(
         f":white_check_mark: Holiday added (ID: **{holiday_id}**)\n"
-        f"_{_fmt_date_range(start, end)}{label_str}_"
+        f"_{_fmt_partial_range(start, end, start_part, end_part)}{label_str}_"
     )
 
 
@@ -212,23 +334,41 @@ def cmd_holiday_list(user_id: str, text: str) -> dict:
         for row in rows:
             start = date.fromisoformat(row["start_date"])
             end = date.fromisoformat(row["end_date"])
+            sp, ep = _row_part(row, "start_part"), _row_part(row, "end_part")
             label_str = f" _({row['label']})_" if row["label"] else ""
-            lines.append(f"- **{row['id']}** — {_fmt_range_with_day(start, end)}{label_str}")
+            lines.append(f"- **{row['id']}** — {_fmt_partial_range_with_day(start, end, sp, ep)}{label_str}")
         lines.append("\n_Use `/holiday-delete <ID>` to remove one._")
         return _resp("\n".join(lines))
 
     if arg == "all":
         rows = database.get_all_upcoming_holidays(today)
-        if not rows:
+        lines: list[str] = []
+        if rows:
+            lines.append(":desert_island: **All upcoming holidays:**\n")
+            aliases = database.get_all_aliases()
+            for row in rows:
+                start = date.fromisoformat(row["start_date"])
+                end = date.fromisoformat(row["end_date"])
+                sp, ep = _row_part(row, "start_part"), _row_part(row, "end_part")
+                label_str = f" _({row['label']})_" if row["label"] else ""
+                alias = aliases.get(row["user_id"])
+                if alias:
+                    name = f"@{alias}"
+                else:
+                    current = mattermost.get_username(row["user_id"])
+                    name = f"@{current or row['username']}"
+                lines.append(f"- {name}: {_fmt_partial_range_with_day(start, end, sp, ep)}{label_str}")
+
+        public = public_holidays.in_range(today, today + timedelta(days=60))
+        if public:
+            if lines:
+                lines.append("")
+            lines.append(":flags: **Public holidays (next 60 days):**\n")
+            for d, label, flag, name in public:
+                lines.append(f"- {flag} {label}: {_fmt_date_with_day(d)} — {name}")
+
+        if not lines:
             return _resp(":white_check_mark: No upcoming holidays registered.")
-        lines = [":desert_island: **All upcoming holidays:**\n"]
-        aliases = database.get_all_aliases()
-        for row in rows:
-            start = date.fromisoformat(row["start_date"])
-            end = date.fromisoformat(row["end_date"])
-            label_str = f" _({row['label']})_" if row["label"] else ""
-            name = f"@{aliases.get(row['user_id'], row['username'])}"
-            lines.append(f"- {name}: {_fmt_range_with_day(start, end)}{label_str}")
         return _resp("\n".join(lines))
 
     # Specific name — try alias lookup first, fall back to username column
@@ -244,8 +384,9 @@ def cmd_holiday_list(user_id: str, text: str) -> dict:
     for row in rows:
         start = date.fromisoformat(row["start_date"])
         end = date.fromisoformat(row["end_date"])
+        sp, ep = _row_part(row, "start_part"), _row_part(row, "end_part")
         label_str = f" _({row['label']})_" if row["label"] else ""
-        lines.append(f"- {_fmt_range_with_day(start, end)}{label_str}")
+        lines.append(f"- {_fmt_partial_range_with_day(start, end, sp, ep)}{label_str}")
     return _resp("\n".join(lines))
 
 
@@ -319,20 +460,39 @@ def cmd_birthday_delete(user_id: str) -> dict:
 def cmd_away_today() -> dict:
     today = _today()
     rows = database.get_holidays_overlapping_date(today)
+    public = public_holidays.on_date(today)
 
-    if not rows:
+    if not rows and not public:
         return _resp(
             f":white_check_mark: No one is away today ({_fmt_date(today)}).",
             response_type="in_channel",
         )
 
-    lines = [f":desert_island: **Away today ({_fmt_date(today)}):**\n"]
-    for row in rows:
-        start = date.fromisoformat(row["start_date"])
-        end = date.fromisoformat(row["end_date"])
-        label_str = f" _({row['label']})_" if row["label"] else ""
-        name = _display_name(row["user_id"], row["username"])
-        lines.append(f"- {name}: {_fmt_date_range(start, end)}{label_str}")
+    lines: list[str] = []
+    if rows:
+        lines.append(f":desert_island: **Away today ({_fmt_date(today)}):**\n")
+        for row in rows:
+            start = date.fromisoformat(row["start_date"])
+            end = date.fromisoformat(row["end_date"])
+            sp, ep = _row_part(row, "start_part"), _row_part(row, "end_part")
+            label_str = f" _({row['label']})_" if row["label"] else ""
+            name = _display_name(row["user_id"], row["username"])
+            today_marker = ""
+            if start == today and sp == "afternoon":
+                today_marker = " _(afternoon only)_"
+            elif end == today and ep == "morning":
+                today_marker = " _(morning only)_"
+            lines.append(
+                f"- {name}: {_fmt_partial_range(start, end, sp, ep)}{today_marker}{label_str}"
+            )
+    else:
+        lines.append(f":white_check_mark: No one is away today ({_fmt_date(today)}).")
+
+    if public:
+        lines.append("")
+        lines.append(":flags: **Public holiday today:**")
+        for label, flag, name in public:
+            lines.append(f"- {flag} {label}: {name}")
 
     return _resp("\n".join(lines), response_type="in_channel")
 
@@ -397,12 +557,15 @@ def cmd_holiday_notify(user_id: str, username: str, text: str) -> dict:
     if isinstance(parsed, str):
         return _resp(parsed)
 
-    start, end, label = parsed
-    holiday_id = database.add_holiday(user_id, username, start.isoformat(), end.isoformat(), label)
+    start, end, label, start_part, end_part = parsed
+    holiday_id = database.add_holiday(
+        user_id, username, start.isoformat(), end.isoformat(), label,
+        start_part=start_part, end_part=end_part,
+    )
     label_str = f": _{label}_" if label else ""
     base_msg = (
         f":white_check_mark: Holiday added (ID: **{holiday_id}**)\n"
-        f"_{_fmt_date_range(start, end)}{label_str}_"
+        f"_{_fmt_partial_range(start, end, start_part, end_part)}{label_str}_"
     )
 
     admin_email = config.COMPANY_ADMIN_EMAIL
