@@ -214,6 +214,38 @@ def add_holiday(
     return cursor.lastrowid
 
 
+def find_duplicate_holiday(
+    user_id: str,
+    start_date: str,
+    end_date: str,
+    label: str | None,
+    start_part: str,
+    end_part: str,
+) -> int | None:
+    """
+    Return the id of an existing holiday with identical fields for this user,
+    or None. Used to prevent accidental duplicate inserts that would cause
+    every announcement about that day to fire twice.
+    """
+    with _conn() as conn:
+        # NULL = NULL is false in SQL, so the label clause is split.
+        if label is None:
+            row = conn.execute(
+                "SELECT id FROM holidays "
+                "WHERE user_id = ? AND start_date = ? AND end_date = ? "
+                "  AND label IS NULL AND start_part = ? AND end_part = ?",
+                (user_id, start_date, end_date, start_part, end_part),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id FROM holidays "
+                "WHERE user_id = ? AND start_date = ? AND end_date = ? "
+                "  AND label = ? AND start_part = ? AND end_part = ?",
+                (user_id, start_date, end_date, label, start_part, end_part),
+            ).fetchone()
+    return row["id"] if row else None
+
+
 def get_upcoming_holidays(user_id: str, today: date) -> list[sqlite3.Row]:
     """Return holidays for a user whose end_date >= today, ordered by start_date."""
     with _conn() as conn:

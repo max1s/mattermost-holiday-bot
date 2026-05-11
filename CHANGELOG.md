@@ -2,6 +2,11 @@
 
 Running log of user-visible changes, newest first. Each entry covers a deployment cycle (kill bot → edit → restart). Older changes that predate this log live in `git log`.
 
+## 2026-05-11
+
+### Fixed
+- **Duplicate-holiday guard.** `/holiday-add` and `/holiday-notify` now reject inserts that would produce a row identical to one the user already has (same `user_id` + dates + parts + label), returning the existing ID so the user can delete it if they meant to replace. Stops the "every reminder fires twice" symptom seen when a user accidentally double-submits. Pre-existing duplicate rows in the DB are left alone — clean them up by ID via `/holiday-delete <ID>`.
+
 ## 2026-05-01
 
 ### Fixed

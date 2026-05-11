@@ -307,6 +307,17 @@ def cmd_holiday_add(user_id: str, username: str, text: str) -> dict:
         return _resp(parsed)
 
     start, end, label, start_part, end_part = parsed
+
+    existing = database.find_duplicate_holiday(
+        user_id, start.isoformat(), end.isoformat(), label, start_part, end_part,
+    )
+    if existing is not None:
+        return _resp(
+            f":warning: You already have an identical holiday registered "
+            f"(ID **{existing}**). Nothing added.\n"
+            "_Use `/holiday-delete " + str(existing) + "` first if you want to replace it._"
+        )
+
     holiday_id = database.add_holiday(
         user_id, username, start.isoformat(), end.isoformat(), label,
         start_part=start_part, end_part=end_part,
@@ -558,6 +569,17 @@ def cmd_holiday_notify(user_id: str, username: str, text: str) -> dict:
         return _resp(parsed)
 
     start, end, label, start_part, end_part = parsed
+
+    existing = database.find_duplicate_holiday(
+        user_id, start.isoformat(), end.isoformat(), label, start_part, end_part,
+    )
+    if existing is not None:
+        return _resp(
+            f":warning: You already have an identical holiday registered "
+            f"(ID **{existing}**). Nothing added, no email sent.\n"
+            "_Use `/holiday-delete " + str(existing) + "` first if you want to replace it._"
+        )
+
     holiday_id = database.add_holiday(
         user_id, username, start.isoformat(), end.isoformat(), label,
         start_part=start_part, end_part=end_part,
