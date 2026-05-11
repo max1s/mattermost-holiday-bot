@@ -26,6 +26,14 @@ def _today() -> date:
     return datetime.now(tz=config.TIMEZONE).date()
 
 
+def _next_working_day(d: date) -> date:
+    """Return the next Mon-Fri after d (skips Sat/Sun)."""
+    nxt = d + timedelta(days=1)
+    while nxt.weekday() >= 5:  # 5=Sat, 6=Sun
+        nxt += timedelta(days=1)
+    return nxt
+
+
 def _week_bounds(ref: date) -> tuple[date, date]:
     """Return (Monday, Sunday) of the ISO week containing ref."""
     monday = ref - timedelta(days=ref.weekday())
@@ -209,8 +217,9 @@ def job_weekly_summary() -> None:
 
 def job_daily_reminders() -> None:
     """
-    Post holiday reminders for holidays starting exactly 7 days or 1 day from today.
-    One message per person, no grouped headers.
+    Post holiday reminders for holidays starting in 7 days or on the next
+    working day (skips weekends — so Friday's reminder picks up Monday's
+    holidays). One message per person, no grouped headers.
     Skipped on Mondays — the weekly summary already covers those holidays.
     """
     try:
@@ -219,7 +228,9 @@ def job_daily_reminders() -> None:
             logger.debug("Daily reminders: skipping on Monday (covered by weekly summary).")
             return
         target_7 = today + timedelta(days=7)
-        target_1 = today + timedelta(days=1)
+        target_1 = _next_working_day(today)
+        days_ahead = (target_1 - today).days
+        timing_1 = "tomorrow" if days_ahead == 1 else f"on {target_1.strftime('%A')}"
 
         hols_7 = database.get_holidays_starting_on(target_7)
         hols_1 = database.get_holidays_starting_on(target_1)
@@ -253,13 +264,16 @@ def job_daily_reminders() -> None:
             end   = date.fromisoformat(row["end_date"])
             mattermost.post_to_announcement_channel(
                 _holiday_message(
-                    _name(row), "tomorrow", start, end, row["label"],
+                    _name(row), timing_1, start, end, row["label"],
                     start_part=_row_part(row, "start_part"),
                     end_part=_row_part(row, "end_part"),
                 )
             )
 
-        logger.info("Daily reminders posted (7-day: %d, 1-day: %d).", len(hols_7), len(hols_1))
+        logger.info(
+            "Daily reminders posted (7-day: %d, %s: %d).",
+            len(hols_7), timing_1, len(hols_1),
+        )
 
     except Exception:
         logger.exception("Failed to post daily reminders.")

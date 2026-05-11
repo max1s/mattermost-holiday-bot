@@ -2,6 +2,11 @@
 
 Running log of user-visible changes, newest first. Each entry covers a deployment cycle (kill bot → edit → restart). Older changes that predate this log live in `git log`.
 
+## 2026-05-01
+
+### Fixed
+- **Monday holidays no longer go un-reminded the day before.** The 1-day-out daily reminder now targets the next working day rather than literally `today + 1`, so Friday's 9 AM job picks up holidays that start the following Monday (previously Sun was filtered out by the `mon-fri` cron trigger and Friday only looked at Saturday). The reminder phrasing adapts: "tomorrow" stays for Tue–Fri-after-Mon-through-Thu, "on Monday" (or other day name) when the next working day is more than one calendar day ahead.
+
 ## 2026-04-30 (docs)
 
 ### Documentation
