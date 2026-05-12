@@ -11,6 +11,10 @@ build/
 # Environment / secrets
 .env
 
+# Local test/scratch scripts — kept out of the repo because they may
+# contain personal credentials or company-internal URLs.
+holiday_bot_test_old/
+
 # Database
 *.db
 *.db-shm
